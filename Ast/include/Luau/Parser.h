@@ -553,7 +553,6 @@ private:
     AstName nameNumber;
     AstName nameError;
     AstName nameNil;
-    AstName nameSwitchTemporary;
 
     MatchLexeme endMismatchSuspect;
 
@@ -573,6 +572,7 @@ private:
 
     std::vector<AstAttr*> scratchAttr;
     std::vector<AstStat*> scratchStat;
+    std::vector<AstStatSwitchCase> scratchSwitchCase;
     std::vector<AstArray<char>> scratchString;
     std::vector<AstArray<char>> scratchString2;
     std::vector<AstExpr*> scratchExpr;
