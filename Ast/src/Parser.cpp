@@ -593,7 +593,7 @@ AstStat* Parser::parseSwitch()
     AstExpr* subject = parseExpr();
 
     AstLocal* switchLocal = allocator.alloc<AstLocal>(
-        names.getOrAdd("__switch"),
+        lexer.names.getOrAdd("__switch"),
         start,
         /* shadow= */ nullptr,
         functionStack.size() - 1,
