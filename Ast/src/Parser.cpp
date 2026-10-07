@@ -328,7 +328,6 @@ Parser::Parser(const char* buffer, size_t bufferSize, AstNameTable& names, Alloc
     nameNumber = names.getOrAdd("number");
     nameError = names.getOrAdd(kParseNameError);
     nameNil = names.getOrAdd("nil"); // nil is a reserved keyword
-    nameSwitchTemporary = names.getOrAdd("__switch");
 
     matchRecoveryStopOnToken.assign(Lexeme::Type::Reserved_END, 0);
     matchRecoveryStopOnToken[Lexeme::Type::Eof] = 1;
@@ -591,31 +590,7 @@ AstStat* Parser::parseSwitch()
     nextLexeme(); // switch
 
     AstExpr* subject = parseExpr();
-
-    AstLocal* switchLocal = allocator.alloc<AstLocal>(
-        nameSwitchTemporary,
-        start,
-        /* shadow= */ nullptr,
-        functionStack.size() - 1,
-        functionStack.back().loopDepth,
-        /* annotation= */ nullptr,
-        /* isConst= */ true
-    );
-
-    AstStatLocal* subjectStat =
-        allocator.alloc<AstStatLocal>(Location(start, subject->location), copy({switchLocal}), copy({subject}), std::nullopt, true);
-
-    struct SwitchCase
-    {
-        AstExpr* value;
-        AstStatBlock* body;
-        std::optional<Location> thenLocation;
-        Location location;
-        double number = 0.0;
-        bool numeric = false;
-    };
-
-    std::vector<SwitchCase> cases;
+    TempVector<AstStatSwitchCase> cases(scratchSwitchCase);
 
     while (lexer.current().type == Lexeme::ReservedCase)
     {
@@ -631,20 +606,7 @@ AstStat* Parser::parseSwitch()
 
         AstStatBlock* body = parseBlock();
         body->hasEnd = true;
-
-        SwitchCase switchCase{value, body, thenLocation, caseLocation};
-        if (AstExprConstantNumber* number = value->as<AstExprConstantNumber>())
-        {
-            switchCase.number = number->value;
-            switchCase.numeric = true;
-        }
-        else if (AstExprConstantInteger* integer = value->as<AstExprConstantInteger>())
-        {
-            switchCase.number = double(integer->value);
-            switchCase.numeric = true;
-        }
-
-        cases.push_back(switchCase);
+        cases.push_back({value, body, caseLocation, thenLocation});
     }
 
     AstStatBlock* elsebody = nullptr;
@@ -661,127 +623,7 @@ AstStat* Parser::parseSwitch()
     Location end = lexer.current().location;
     expectMatchEndAndConsume(Lexeme::ReservedEnd, matchSwitch);
 
-    auto makeLocalExpr = [&](const Location& location) -> AstExpr* {
-        return allocator.alloc<AstExprLocal>(location, switchLocal, /* upvalue= */ false);
-    };
-
-    AstStat* chain = nullptr;
-
-    bool numericDispatch = !cases.empty();
-    for (const SwitchCase& switchCase : cases)
-        numericDispatch = numericDispatch && switchCase.numeric;
-
-    if (numericDispatch)
-    {
-        std::vector<size_t> order(cases.size());
-        for (size_t i = 0; i < order.size(); ++i)
-            order[i] = i;
-
-        std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
-            return cases[a].number < cases[b].number;
-        });
-
-        for (size_t i = 1; i < order.size(); ++i)
-        {
-            if (cases[order[i - 1]].number == cases[order[i]].number)
-            {
-                numericDispatch = false;
-                break;
-            }
-        }
-
-        if (numericDispatch)
-        {
-            auto buildTree = [&](auto&& self, size_t first, size_t last) -> AstStat* {
-                if (first == last)
-                    return elsebody;
-
-                size_t middle = first + (last - first) / 2;
-                const SwitchCase& pivot = cases[order[middle]];
-
-                AstExpr* equality = allocator.alloc<AstExprBinary>(
-                    Location(pivot.location, pivot.value->location),
-                    AstExprBinary::CompareEq,
-                    makeLocalExpr(pivot.location),
-                    pivot.value
-                );
-
-                AstStat* upper = self(self, middle + 1, last);
-                AstExpr* less = allocator.alloc<AstExprBinary>(
-                    Location(pivot.location, pivot.value->location),
-                    AstExprBinary::CompareLt,
-                    makeLocalExpr(pivot.location),
-                    pivot.value
-                );
-                AstStat* lower = self(self, first, middle);
-
-                AstStat* partition = allocator.alloc<AstStatIf>(
-                    Location(pivot.location, end),
-                    less,
-                    allocator.alloc<AstStatBlock>(pivot.location, copy({lower})),
-                    upper,
-                    std::nullopt,
-                    std::nullopt
-                );
-
-                return allocator.alloc<AstStatIf>(
-                    Location(pivot.location, end), equality, pivot.body, partition, pivot.thenLocation, std::nullopt
-                );
-            };
-
-            chain = buildTree(buildTree, 0, order.size());
-        }
-    }
-
-    if (!numericDispatch)
-    {
-        chain = elsebody;
-
-        for (size_t i = cases.size(); i > 0; --i)
-        {
-            const SwitchCase& switchCase = cases[i - 1];
-
-            AstExpr* condition = allocator.alloc<AstExprBinary>(
-                Location(switchCase.location, switchCase.value->location),
-                AstExprBinary::CompareEq,
-                makeLocalExpr(switchCase.location),
-                switchCase.value
-            );
-
-            chain = allocator.alloc<AstStatIf>(
-                Location(switchCase.location, end),
-                condition,
-                switchCase.body,
-                chain,
-                switchCase.thenLocation,
-                i == cases.size() ? elseLocation : std::optional<Location>()
-            );
-        }
-    }
-
-    TempVector<AstStat*> result(scratchStat);
-    result.push_back(subjectStat);
-
-    if (chain)
-        result.push_back(chain);
-
-    AstStatBlock* block = allocator.alloc<AstStatBlock>(Location(start, end), copy(result));
-
-    TempVector<AstExpr*> switchValues(scratchExpr);
-    std::vector<AstStatBlock*> switchBodies;
-    switchBodies.reserve(cases.size());
-    for (const SwitchCase& switchCase : cases)
-    {
-        switchValues.push_back(switchCase.value);
-        switchBodies.push_back(switchCase.body);
-    }
-
-    block->switchSubject = subject;
-    block->switchValues = copy(switchValues);
-    block->switchBodies = copy(switchBodies.data(), switchBodies.size());
-    block->switchElse = elsebody;
-
-    return block;
+    return allocator.alloc<AstStatSwitch>(Location(start, end), subject, copy(cases), elsebody, elseLocation);
 }
 
 // if exp then block {elseif exp then block} [else block] end
