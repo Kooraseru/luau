@@ -1,6 +1,6 @@
 from pathlib import Path
 
-SIZES = [4, 16, 64, 256]
+SIZES = [4, 16, 64, 256, 1024]
 ITERATIONS = 2_000_000
 KINDS = ("if", "switch", "table", "function-table")
 OUT = Path(__file__).with_name("generated")
