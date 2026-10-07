@@ -122,6 +122,10 @@ private:
     // if exp then block {elseif exp then block} [else block] end
     AstStat* parseIf();
 
+    // switch exp {case exp then block} [else block] end
+    // Initially lowered directly into a synthetic local plus an if/else chain.
+    AstStat* parseSwitch();
+
     // (`if' | `elseif') (`local' | `const') binding `=' exp then block ... end -- parses an entire `if local`/`if const`
     AstStat* parseIfLocalCondition(const Location& start);
 
