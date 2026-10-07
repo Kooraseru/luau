@@ -736,14 +736,6 @@ public:
 
     AstArray<AstStat*> body;
 
-    // Experimental switch metadata. The parser still lowers switch to ordinary AST for
-    // analysis/fallback, but retaining the original pieces lets the bytecode compiler
-    // select a dedicated dispatch strategy without reverse-engineering that lowering.
-    AstExpr* switchSubject = nullptr;
-    AstArray<AstExpr*> switchValues;
-    AstArray<AstStatBlock*> switchBodies;
-    AstStatBlock* switchElse = nullptr;
-
     /* Indicates whether or not this block has been terminated in a
      * syntactically valid way.
      *
@@ -755,6 +747,35 @@ public:
      * 'until' keyword.
      */
     bool hasEnd = false;
+};
+
+struct AstStatSwitchCase
+{
+    AstExpr* value;
+    AstStatBlock* body;
+    Location location;
+    std::optional<Location> thenLocation;
+};
+
+class AstStatSwitch : public AstStat
+{
+public:
+    LUAU_RTTI(AstStatSwitch)
+
+    AstStatSwitch(
+        const Location& location,
+        AstExpr* subject,
+        AstArray<AstStatSwitchCase> cases,
+        AstStatBlock* elsebody,
+        const std::optional<Location>& elseLocation
+    );
+
+    void visit(AstVisitor* visitor) override;
+
+    AstExpr* subject;
+    AstArray<AstStatSwitchCase> cases;
+    AstStatBlock* elsebody;
+    std::optional<Location> elseLocation;
 };
 
 class AstStatIf : public AstStat
@@ -1606,6 +1627,10 @@ public:
     }
 
     virtual bool visit(class AstStatBlock* node)
+    {
+        return visit(static_cast<AstStat*>(node));
+    }
+    virtual bool visit(class AstStatSwitch* node)
     {
         return visit(static_cast<AstStat*>(node));
     }
