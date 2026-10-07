@@ -716,9 +716,12 @@ AstStat* Parser::parseSwitch()
                 AstStat* lower = self(self, first, middle);
 
                 AstStat* partition = allocator.alloc<AstStatIf>(
-                    Location(pivot.location, end), less,
+                    Location(pivot.location, end),
+                    less,
                     allocator.alloc<AstStatBlock>(pivot.location, copy({lower})),
-                    upper
+                    upper,
+                    std::nullopt,
+                    std::nullopt
                 );
 
                 return allocator.alloc<AstStatIf>(
