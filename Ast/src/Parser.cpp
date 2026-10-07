@@ -579,12 +579,11 @@ AstStat* Parser::parseStat()
 
 // switch exp {case exp then block} [else block] end
 //
-// This first implementation deliberately lowers switch into existing AST nodes:
-//     local __switch = exp
-//     if __switch == case1 then ... elseif __switch == case2 then ... else ... end
-//
-// The subject is therefore evaluated exactly once, cases are tested in source order,
-// and no VM/bytecode changes are required for the initial experiment.
+// The subject is evaluated exactly once.  For distinct numeric literal cases we
+// build a balanced binary decision tree; other switches retain source-ordered
+// equality dispatch.  The balanced form is intentionally expressed using the
+// existing AST so this experiment can measure compiler/runtime effects without
+// adding a VM opcode.
 AstStat* Parser::parseSwitch()
 {
     Location start = lexer.current().location;
@@ -612,6 +611,8 @@ AstStat* Parser::parseSwitch()
         AstStatBlock* body;
         std::optional<Location> thenLocation;
         Location location;
+        double number = 0.0;
+        bool numeric = false;
     };
 
     std::vector<SwitchCase> cases;
@@ -631,7 +632,19 @@ AstStat* Parser::parseSwitch()
         AstStatBlock* body = parseBlock();
         body->hasEnd = true;
 
-        cases.push_back({value, body, thenLocation, caseLocation});
+        SwitchCase switchCase{value, body, thenLocation, caseLocation};
+        if (AstExprConstantNumber* number = value->as<AstExprConstantNumber>())
+        {
+            switchCase.number = number->value;
+            switchCase.numeric = true;
+        }
+        else if (AstExprConstantInteger* integer = value->as<AstExprConstantInteger>())
+        {
+            switchCase.number = double(integer->value);
+            switchCase.numeric = true;
+        }
+
+        cases.push_back(switchCase);
     }
 
     AstStatBlock* elsebody = nullptr;
@@ -648,25 +661,99 @@ AstStat* Parser::parseSwitch()
     Location end = lexer.current().location;
     expectMatchEndAndConsume(Lexeme::ReservedEnd, matchSwitch);
 
-    AstStat* chain = elsebody;
+    auto makeLocalExpr = [&](const Location& location) -> AstExpr* {
+        return allocator.alloc<AstExprLocal>(location, switchLocal, /* upvalue= */ false);
+    };
 
-    for (size_t i = cases.size(); i > 0; --i)
+    AstStat* chain = nullptr;
+
+    bool numericDispatch = !cases.empty();
+    for (const SwitchCase& switchCase : cases)
+        numericDispatch = numericDispatch && switchCase.numeric;
+
+    if (numericDispatch)
     {
-        const SwitchCase& switchCase = cases[i - 1];
+        std::vector<size_t> order(cases.size());
+        for (size_t i = 0; i < order.size(); ++i)
+            order[i] = i;
 
-        AstExpr* localExpr = allocator.alloc<AstExprLocal>(switchCase.location, switchLocal, /* upvalue= */ false);
-        AstExpr* condition = allocator.alloc<AstExprBinary>(
-            Location(switchCase.location, switchCase.value->location), AstExprBinary::CompareEq, localExpr, switchCase.value
-        );
+        std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+            return cases[a].number < cases[b].number;
+        });
 
-        chain = allocator.alloc<AstStatIf>(
-            Location(switchCase.location, end),
-            condition,
-            switchCase.body,
-            chain,
-            switchCase.thenLocation,
-            i == cases.size() ? elseLocation : std::optional<Location>()
-        );
+        for (size_t i = 1; i < order.size(); ++i)
+        {
+            if (cases[order[i - 1]].number == cases[order[i]].number)
+            {
+                numericDispatch = false;
+                break;
+            }
+        }
+
+        if (numericDispatch)
+        {
+            auto buildTree = [&](auto&& self, size_t first, size_t last) -> AstStat* {
+                if (first == last)
+                    return elsebody;
+
+                size_t middle = first + (last - first) / 2;
+                const SwitchCase& pivot = cases[order[middle]];
+
+                AstExpr* equality = allocator.alloc<AstExprBinary>(
+                    Location(pivot.location, pivot.value->location),
+                    AstExprBinary::CompareEq,
+                    makeLocalExpr(pivot.location),
+                    pivot.value
+                );
+
+                AstStat* upper = self(self, middle + 1, last);
+                AstExpr* less = allocator.alloc<AstExprBinary>(
+                    Location(pivot.location, pivot.value->location),
+                    AstExprBinary::CompareLt,
+                    makeLocalExpr(pivot.location),
+                    pivot.value
+                );
+                AstStat* lower = self(self, first, middle);
+
+                AstStat* partition = allocator.alloc<AstStatIf>(
+                    Location(pivot.location, end), less,
+                    allocator.alloc<AstStatBlock>(pivot.location, copy({lower})),
+                    upper
+                );
+
+                return allocator.alloc<AstStatIf>(
+                    Location(pivot.location, end), equality, pivot.body, partition, pivot.thenLocation, std::nullopt
+                );
+            };
+
+            chain = buildTree(buildTree, 0, order.size());
+        }
+    }
+
+    if (!numericDispatch)
+    {
+        chain = elsebody;
+
+        for (size_t i = cases.size(); i > 0; --i)
+        {
+            const SwitchCase& switchCase = cases[i - 1];
+
+            AstExpr* condition = allocator.alloc<AstExprBinary>(
+                Location(switchCase.location, switchCase.value->location),
+                AstExprBinary::CompareEq,
+                makeLocalExpr(switchCase.location),
+                switchCase.value
+            );
+
+            chain = allocator.alloc<AstStatIf>(
+                Location(switchCase.location, end),
+                condition,
+                switchCase.body,
+                chain,
+                switchCase.thenLocation,
+                i == cases.size() ? elseLocation : std::optional<Location>()
+            );
+        }
     }
 
     TempVector<AstStat*> result(scratchStat);
