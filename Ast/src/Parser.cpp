@@ -358,8 +358,8 @@ Parser::Parser(const char* buffer, size_t bufferSize, AstNameTable& names, Alloc
 
 bool Parser::blockFollow(const Lexeme& l)
 {
-    return l.type == Lexeme::Eof || l.type == Lexeme::ReservedElse || l.type == Lexeme::ReservedElseif || l.type == Lexeme::ReservedEnd ||
-           l.type == Lexeme::ReservedUntil;
+    return l.type == Lexeme::Eof || l.type == Lexeme::ReservedCase || l.type == Lexeme::ReservedElse || l.type == Lexeme::ReservedElseif ||
+           l.type == Lexeme::ReservedEnd || l.type == Lexeme::ReservedUntil;
 }
 
 AstStatBlock* Parser::parseChunk()
@@ -446,6 +446,8 @@ AstStat* Parser::parseStat()
     {
     case Lexeme::ReservedIf:
         return parseIf();
+    case Lexeme::ReservedSwitch:
+        return parseSwitch();
     case Lexeme::ReservedWhile:
         return parseWhile();
     case Lexeme::ReservedDo:
@@ -572,6 +574,107 @@ AstStat* Parser::parseStat()
         nextLexeme();
 
     return reportStatError(expr->location, copy({expr}), {}, "Incomplete statement: expected assignment or a function call");
+}
+
+// switch exp {case exp then block} [else block] end
+//
+// This first implementation deliberately lowers switch into existing AST nodes:
+//     local __switch = exp
+//     if __switch == case1 then ... elseif __switch == case2 then ... else ... end
+//
+// The subject is therefore evaluated exactly once, cases are tested in source order,
+// and no VM/bytecode changes are required for the initial experiment.
+AstStat* Parser::parseSwitch()
+{
+    Location start = lexer.current().location;
+    Lexeme matchSwitch = lexer.current();
+    nextLexeme(); // switch
+
+    AstExpr* subject = parseExpr();
+
+    AstLocal* switchLocal = allocator.alloc<AstLocal>(
+        names.getOrAdd("__switch"),
+        start,
+        /* shadow= */ nullptr,
+        functionStack.size() - 1,
+        functionStack.back().loopDepth,
+        /* annotation= */ nullptr,
+        /* isConst= */ true
+    );
+
+    AstStatLocal* subjectStat =
+        allocator.alloc<AstStatLocal>(Location(start, subject->location), copy({switchLocal}), copy({subject}), std::nullopt, true);
+
+    struct SwitchCase
+    {
+        AstExpr* value;
+        AstStatBlock* body;
+        std::optional<Location> thenLocation;
+        Location location;
+    };
+
+    std::vector<SwitchCase> cases;
+
+    while (lexer.current().type == Lexeme::ReservedCase)
+    {
+        Location caseLocation = lexer.current().location;
+        nextLexeme(); // case
+
+        AstExpr* value = parseExpr();
+
+        Lexeme matchThen = lexer.current();
+        std::optional<Location> thenLocation;
+        if (expectAndConsume(Lexeme::ReservedThen, "switch case"))
+            thenLocation = matchThen.location;
+
+        AstStatBlock* body = parseBlock();
+        body->hasEnd = true;
+
+        cases.push_back({value, body, thenLocation, caseLocation});
+    }
+
+    AstStatBlock* elsebody = nullptr;
+    std::optional<Location> elseLocation;
+
+    if (lexer.current().type == Lexeme::ReservedElse)
+    {
+        elseLocation = lexer.current().location;
+        nextLexeme(); // else
+        elsebody = parseBlock();
+        elsebody->hasEnd = true;
+    }
+
+    Location end = lexer.current().location;
+    expectMatchEndAndConsume(Lexeme::ReservedEnd, matchSwitch);
+
+    AstStat* chain = elsebody;
+
+    for (size_t i = cases.size(); i > 0; --i)
+    {
+        const SwitchCase& switchCase = cases[i - 1];
+
+        AstExpr* localExpr = allocator.alloc<AstExprLocal>(switchCase.location, switchLocal, /* upvalue= */ false);
+        AstExpr* condition = allocator.alloc<AstExprBinary>(
+            Location(switchCase.location, switchCase.value->location), AstExprBinary::CompareEq, localExpr, switchCase.value
+        );
+
+        chain = allocator.alloc<AstStatIf>(
+            Location(switchCase.location, end),
+            condition,
+            switchCase.body,
+            chain,
+            switchCase.thenLocation,
+            i == cases.size() ? elseLocation : std::optional<Location>()
+        );
+    }
+
+    TempVector<AstStat*> result(scratchStat);
+    result.push_back(subjectStat);
+
+    if (chain)
+        result.push_back(chain);
+
+    return allocator.alloc<AstStatBlock>(Location(start, end), copy(result));
 }
 
 // if exp then block {elseif exp then block} [else block] end
