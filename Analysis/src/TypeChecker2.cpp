@@ -680,6 +680,8 @@ void TypeChecker2::visit(AstStat* stat)
 
     if (auto s = stat->as<AstStatBlock>())
         return visit(s);
+    else if (auto s = stat->as<AstStatSwitch>())
+        return visit(s);
     else if (auto s = stat->as<AstStatIf>())
         return visit(s);
     else if (auto s = stat->as<AstStatWhile>())
@@ -732,6 +734,18 @@ void TypeChecker2::visit(AstStatBlock* block)
 
     for (AstStat* statement : block->body)
         visit(statement);
+}
+
+void TypeChecker2::visit(AstStatSwitch* switchStatement)
+{
+    visit(switchStatement->subject, ValueContext::RValue);
+    for (const AstStatSwitchCase& switchCase : switchStatement->cases)
+    {
+        visit(switchCase.value, ValueContext::RValue);
+        visit(switchCase.body);
+    }
+    if (switchStatement->elsebody)
+        visit(switchStatement->elsebody);
 }
 
 void TypeChecker2::visit(AstStatIf* ifStatement)
