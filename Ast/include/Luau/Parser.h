@@ -95,6 +95,8 @@ private:
     Parser(const char* buffer, std::size_t bufferSize, AstNameTable& names, Allocator& allocator, const ParseOptions& options);
 
     bool blockFollow(const Lexeme& l);
+    bool switchBlockFollow(const Lexeme& l);
+    bool isContextualKeyword(const Lexeme& l, const char* keyword) const;
 
     AstStatBlock* parseChunk();
 
@@ -103,6 +105,7 @@ private:
     AstStatBlock* parseBlock();
 
     AstStatBlock* parseBlockNoScope();
+    AstStatBlock* parseSwitchBlock();
 
     // stat ::=
     // varlist `=' explist |
