@@ -624,6 +624,36 @@ void AstStatBlock::visit(AstVisitor* visitor)
     }
 }
 
+AstStatSwitch::AstStatSwitch(
+    const Location& location,
+    AstExpr* subject,
+    AstArray<AstStatSwitchCase> cases,
+    AstStatBlock* elsebody,
+    const std::optional<Location>& elseLocation
+)
+    : AstStat(ClassIndex(), location)
+    , subject(subject)
+    , cases(cases)
+    , elsebody(elsebody)
+    , elseLocation(elseLocation)
+{
+}
+
+void AstStatSwitch::visit(AstVisitor* visitor)
+{
+    if (visitor->visit(this))
+    {
+        subject->visit(visitor);
+        for (const AstStatSwitchCase& switchCase : cases)
+        {
+            switchCase.value->visit(visitor);
+            switchCase.body->visit(visitor);
+        }
+        if (elsebody)
+            elsebody->visit(visitor);
+    }
+}
+
 AstStatIf::AstStatIf(
     const Location& location,
     AstExpr* condition,
