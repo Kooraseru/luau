@@ -553,6 +553,7 @@ private:
     AstName nameNumber;
     AstName nameError;
     AstName nameNil;
+    AstName nameSwitchTemporary;
 
     MatchLexeme endMismatchSuspect;
 
