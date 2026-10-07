@@ -768,7 +768,8 @@ AstStat* Parser::parseSwitch()
     AstStatBlock* block = allocator.alloc<AstStatBlock>(Location(start, end), copy(result));
 
     TempVector<AstExpr*> switchValues(scratchExpr);
-    TempVector<AstStatBlock*> switchBodies(scratchStatBlock);
+    std::vector<AstStatBlock*> switchBodies;
+    switchBodies.reserve(cases.size());
     for (const SwitchCase& switchCase : cases)
     {
         switchValues.push_back(switchCase.value);
@@ -777,7 +778,7 @@ AstStat* Parser::parseSwitch()
 
     block->switchSubject = subject;
     block->switchValues = copy(switchValues);
-    block->switchBodies = copy(switchBodies);
+    block->switchBodies = copy(AstArray<AstStatBlock*>(switchBodies.data(), switchBodies.size()));
     block->switchElse = elsebody;
 
     return block;
