@@ -322,6 +322,7 @@ private:
     ControlFlow visit(const ScopePtr& scope, AstStatReturn* ret);
     ControlFlow visit(const ScopePtr& scope, AstStatAssign* assign);
     ControlFlow visit(const ScopePtr& scope, AstStatCompoundAssign* assign);
+    ControlFlow visit(const ScopePtr& scope, AstStatSwitch* switchStatement);
     ControlFlow visit(const ScopePtr& scope, AstStatIf* ifStatement);
     ControlFlow visit(const ScopePtr& scope, AstStatTypeAlias* alias);
     ControlFlow visit(const ScopePtr& scope, AstStatTypeFunction* function);
