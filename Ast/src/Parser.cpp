@@ -594,7 +594,7 @@ AstStat* Parser::parseSwitch()
     AstExpr* subject = parseExpr();
 
     AstLocal* switchLocal = allocator.alloc<AstLocal>(
-        lexer.names.getOrAdd("__switch"),
+        nameSwitchTemporary,
         start,
         /* shadow= */ nullptr,
         functionStack.size() - 1,
