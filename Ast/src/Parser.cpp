@@ -356,10 +356,20 @@ Parser::Parser(const char* buffer, size_t bufferSize, AstNameTable& names, Alloc
     }
 }
 
+bool Parser::isContextualKeyword(const Lexeme& l, const char* keyword) const
+{
+    return l.type == Lexeme::Name && AstName(l.name) == keyword;
+}
+
 bool Parser::blockFollow(const Lexeme& l)
 {
-    return l.type == Lexeme::Eof || l.type == Lexeme::ReservedCase || l.type == Lexeme::ReservedElse || l.type == Lexeme::ReservedElseif ||
-           l.type == Lexeme::ReservedEnd || l.type == Lexeme::ReservedUntil;
+    return l.type == Lexeme::Eof || l.type == Lexeme::ReservedElse || l.type == Lexeme::ReservedElseif || l.type == Lexeme::ReservedEnd ||
+           l.type == Lexeme::ReservedUntil;
+}
+
+bool Parser::switchBlockFollow(const Lexeme& l)
+{
+    return blockFollow(l) || isContextualKeyword(l, "case");
 }
 
 AstStatBlock* Parser::parseChunk()
@@ -424,6 +434,37 @@ AstStatBlock* Parser::parseBlockNoScope()
     return allocator.alloc<AstStatBlock>(location, copy(body));
 }
 
+AstStatBlock* Parser::parseSwitchBlock()
+{
+    unsigned int localsBegin = saveLocals();
+    TempVector<AstStat*> body(scratchStat);
+    const Position prevPosition = lexer.previousLocation().end;
+
+    while (!switchBlockFollow(lexer.current()))
+    {
+        unsigned int oldRecursionCount = recursionCounter;
+        incrementRecursionCounter("switch block");
+        AstStat* stat = parseStat();
+        recursionCounter = oldRecursionCount;
+
+        if (lexer.current().type == ';')
+        {
+            nextLexeme();
+            stat->hasSemicolon = true;
+            stat->location.end = lexer.previousLocation().end;
+        }
+
+        body.push_back(stat);
+        if (isStatLast(stat))
+            break;
+    }
+
+    const Location location = Location(prevPosition, lexer.current().location.begin);
+    AstStatBlock* result = allocator.alloc<AstStatBlock>(location, copy(body));
+    restoreLocals(localsBegin);
+    return result;
+}
+
 // stat ::=
 // varlist `=' explist |
 // functioncall |
@@ -446,8 +487,6 @@ AstStat* Parser::parseStat()
     {
     case Lexeme::ReservedIf:
         return parseIf();
-    case Lexeme::ReservedSwitch:
-        return parseSwitch();
     case Lexeme::ReservedWhile:
         return parseWhile();
     case Lexeme::ReservedDo:
@@ -474,6 +513,9 @@ AstStat* Parser::parseStat()
     }
 
     Location start = lexer.current().location;
+
+    if (isContextualKeyword(lexer.current(), "switch"))
+        return parseSwitch();
 
     // we need to disambiguate a few cases, primarily assignment (lvalue = ...) vs statements-that-are calls
     AstExpr* expr = parsePrimaryExpr(/* asStatement= */ true);
@@ -592,7 +634,7 @@ AstStat* Parser::parseSwitch()
     AstExpr* subject = parseExpr();
     TempVector<AstStatSwitchCase> cases(scratchSwitchCase);
 
-    while (lexer.current().type == Lexeme::ReservedCase)
+    while (isContextualKeyword(lexer.current(), "case"))
     {
         Location caseLocation = lexer.current().location;
         nextLexeme(); // case
@@ -604,7 +646,7 @@ AstStat* Parser::parseSwitch()
         if (expectAndConsume(Lexeme::ReservedThen, "switch case"))
             thenLocation = matchThen.location;
 
-        AstStatBlock* body = parseBlock();
+        AstStatBlock* body = parseSwitchBlock();
         body->hasEnd = true;
         cases.push_back({value, body, caseLocation, thenLocation});
     }
@@ -616,7 +658,7 @@ AstStat* Parser::parseSwitch()
     {
         elseLocation = lexer.current().location;
         nextLexeme(); // else
-        elsebody = parseBlock();
+        elsebody = parseSwitchBlock();
         elsebody->hasEnd = true;
     }
 
