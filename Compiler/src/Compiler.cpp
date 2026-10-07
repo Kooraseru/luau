@@ -3791,6 +3791,41 @@ struct Compiler
         }
     }
 
+    void compileStatSwitch(AstStatSwitch* stat)
+    {
+        RegScope rs(this);
+        uint8_t subjectReg = compileExprAuto(stat->subject, rs);
+        std::vector<size_t> endJumps;
+
+        for (const AstStatSwitchCase& switchCase : stat->cases)
+        {
+            RegScope caseRs(this);
+            uint8_t caseReg = compileExprAuto(switchCase.value, caseRs);
+
+            size_t nextCase = bytecode.emitLabel();
+            bytecode.emitAD(LOP_JUMPIFNOTEQ, subjectReg, 0);
+            bytecode.emitAux(caseReg);
+
+            compileStat(switchCase.body);
+
+            if (!alwaysTerminates(switchCase.body))
+            {
+                size_t endJump = bytecode.emitLabel();
+                bytecode.emitAD(LOP_JUMP, 0, 0);
+                endJumps.push_back(endJump);
+            }
+
+            size_t nextLabel = bytecode.emitLabel();
+            patchJump(stat, nextCase, nextLabel);
+        }
+
+        if (stat->elsebody)
+            compileStat(stat->elsebody);
+
+        size_t endLabel = bytecode.emitLabel();
+        patchJumps(stat, endJumps, endLabel);
+    }
+
     void compileStatIf(AstStatIf* stat)
     {
         // Optimization: condition is always false => we only need the else body
@@ -4880,6 +4915,10 @@ struct Compiler
             }
 
             popLocals(oldLocals);
+        }
+        else if (AstStatSwitch* stat = node->as<AstStatSwitch>())
+        {
+            compileStatSwitch(stat);
         }
         else if (AstStatIf* stat = node->as<AstStatIf>())
         {
