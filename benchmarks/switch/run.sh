@@ -28,19 +28,59 @@ run_group() {
 }
 
 pids=()
+labels=()
 for opt in 0 1 2; do
     for n in 4 16 64 256; do
         for kind in if switch table function-table; do
             run_group "$opt" "$n" "$kind" &
             pids+=("$!")
+            labels+=("-O$opt / $n cases / $kind")
         done
     done
 done
 
 status=0
-for pid in "${pids[@]}"; do
-    wait "$pid" || status=1
+total=${#pids[@]}
+completed=0
+declare -a done_flags=()
+
+draw_progress() {
+    local width=36
+    local filled=$((completed * width / total))
+    local empty=$((width - filled))
+    local percent=$((completed * 100 / total))
+    local bar
+
+    printf -v bar '%*s' "$filled" ''
+    bar=${bar// /#}
+    printf -v rest '%*s' "$empty" ''
+    rest=${rest// /-}
+
+    printf "\r[%s%s] %3d%%  %d/%d groups" "$bar" "$rest" "$percent" "$completed" "$total"
+}
+
+draw_progress
+while (( completed < total )); do
+    for i in "${!pids[@]}"; do
+        [[ ${done_flags[$i]:-0} == 1 ]] && continue
+
+        pid=${pids[$i]}
+        if ! kill -0 "$pid" 2>/dev/null; then
+            if wait "$pid"; then
+                :
+            else
+                status=1
+            fi
+            done_flags[$i]=1
+            ((completed += 1))
+            draw_progress
+        fi
+    done
+
+    (( completed < total )) && sleep 0.1
 done
+printf "\n"
+
 (( status == 0 )) || exit "$status"
 
 for opt in 0 1 2; do
