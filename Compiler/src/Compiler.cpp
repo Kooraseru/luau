@@ -3799,12 +3799,46 @@ struct Compiler
 
         for (const AstStatSwitchCase& switchCase : stat->cases)
         {
-            RegScope caseRs(this);
-            uint8_t caseReg = compileExprAuto(switchCase.value, caseRs);
-
             size_t nextCase = bytecode.emitLabel();
-            bytecode.emitAD(LOP_JUMPIFNOTEQ, subjectReg, 0);
-            bytecode.emitAux(caseReg);
+            Constant constant = getConstant(switchCase.value);
+            LuauOpcode constantJump = LOP_NOP;
+            int32_t cid = -1;
+
+            switch (constant.type)
+            {
+            case Constant::Type_Nil:
+                constantJump = LOP_JUMPXEQKNIL;
+                cid = 0;
+                break;
+            case Constant::Type_Boolean:
+                constantJump = LOP_JUMPXEQKB;
+                cid = constant.valueBoolean;
+                break;
+            case Constant::Type_Number:
+                constantJump = LOP_JUMPXEQKN;
+                cid = getConstantIndex(switchCase.value);
+                break;
+            case Constant::Type_String:
+                constantJump = LOP_JUMPXEQKS;
+                cid = getConstantIndex(switchCase.value);
+                break;
+            default:
+                break;
+            }
+
+            if (constantJump != LOP_NOP && cid >= 0)
+            {
+                // Jump to the next case when the subject does not equal this constant.
+                bytecode.emitAD(constantJump, subjectReg, 0);
+                bytecode.emitAux(uint32_t(cid) | 0x80000000u);
+            }
+            else
+            {
+                RegScope caseRs(this);
+                uint8_t caseReg = compileExprAuto(switchCase.value, caseRs);
+                bytecode.emitAD(LOP_JUMPIFNOTEQ, subjectReg, 0);
+                bytecode.emitAux(caseReg);
+            }
 
             compileStat(switchCase.body);
 
