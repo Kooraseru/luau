@@ -84,6 +84,7 @@ struct TypeChecker
         const WithPredicate<TypeId>& result,
         std::optional<TypeId> expectedType
     );
+    ControlFlow check(const ScopePtr& scope, const AstStatSwitch& statement);
     ControlFlow check(const ScopePtr& scope, const AstStatIf& statement);
     ControlFlow check(const ScopePtr& scope, const AstStatWhile& statement);
     ControlFlow check(const ScopePtr& scope, const AstStatRepeat& statement);
