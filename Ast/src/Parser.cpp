@@ -778,7 +778,7 @@ AstStat* Parser::parseSwitch()
 
     block->switchSubject = subject;
     block->switchValues = copy(switchValues);
-    block->switchBodies = copy(AstArray<AstStatBlock*>(switchBodies.data(), switchBodies.size()));
+    block->switchBodies = copy(switchBodies.data(), switchBodies.size());
     block->switchElse = elsebody;
 
     return block;
