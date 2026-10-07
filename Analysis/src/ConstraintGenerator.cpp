@@ -1379,6 +1379,8 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStat* stat)
 
     if (auto s = stat->as<AstStatBlock>())
         return visit(scope, s);
+    else if (auto s = stat->as<AstStatSwitch>())
+        return visit(scope, s);
     else if (auto i = stat->as<AstStatIf>())
         return visit(scope, i);
     else if (auto s = stat->as<AstStatWhile>())
@@ -2047,6 +2049,23 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatCompoundAss
     module->astCompoundAssignResultTypes[assign] = resultTy;
     // NOTE: We do not update lvalues for compound assignments. This is
     // intentional.
+    return ControlFlow::None;
+}
+
+ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatSwitch* switchStatement)
+{
+    check(scope, switchStatement->subject, std::nullopt);
+    for (const AstStatSwitchCase& switchCase : switchStatement->cases)
+    {
+        check(scope, switchCase.value, std::nullopt);
+        ScopePtr caseScope = childScope(switchCase.body, scope);
+        visit(caseScope, switchCase.body);
+    }
+    if (switchStatement->elsebody)
+    {
+        ScopePtr elseScope = childScope(switchStatement->elsebody, scope);
+        visit(elseScope, switchStatement->elsebody);
+    }
     return ControlFlow::None;
 }
 
