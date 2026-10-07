@@ -130,6 +130,7 @@ private:
     TypePackId reconstructPack(AstArray<AstExpr*> exprs, TypeArena& arena);
     Scope* findInnermostScope(Location location) const;
     void visit(AstStat* stat);
+    void visit(AstStatSwitch* switchStatement);
     void visit(AstStatIf* ifStatement);
     void visit(AstStatWhile* whileStatement);
     void visit(AstStatRepeat* repeatStatement);
