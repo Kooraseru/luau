@@ -1,0 +1,30 @@
+name: Switch correctness Linux
+on:
+  push:
+    branches: [switch-dispatch-optimization]
+  workflow_dispatch:
+
+jobs:
+  switch-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Luau
+        run: |
+          cmake -S . -B build-switch -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-switch --target Luau.Repl.CLI Luau.UnitTest Luau.Compile.CLI --parallel 4
+      - name: Run unit tests
+        run: ./build-switch/Luau.UnitTest
+      - name: Run switch reproduction tests
+        run: |
+          set -eux
+          for opt in O1 O2; do
+            ./build-switch/luau -"$opt" bench/switch/dynamic-case-repro.luau
+            ./build-switch/luau -"$opt" bench/switch/regression.luau
+          done
+      - name: Disassembly on failure
+        if: failure()
+        run: |
+          ./build-switch/luau-compile --text -O1 bench/switch/dynamic-case-repro.luau || true
+          ./build-switch/luau-compile --text -O2 bench/switch/dynamic-case-repro.luau || true
