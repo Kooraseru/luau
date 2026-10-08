@@ -1,36 +1,21 @@
 # Switch dispatch experiment
 
-This experiment uses Luau's existing benchmark harness instead of a custom timing runner.
+The benchmarks compare `if/elseif`, experimental `switch`, value-table lookup, and function-table dispatch at 4, 16, 64, 256, and 1024 cases.
 
-The generated cases compare linear `if/elseif`, the experimental `switch`, direct value-table lookup, and function-table dispatch at 4, 16, 64, 256, and 1024 cases.
-
-Generate the benchmark inputs:
+From the repository root, after configuring the Release build once, run:
 
 ```bash
-python bench/switch/generate.py
+git pull --ff-only origin master && python bench/switch/run.py
 ```
 
-Build a Release VM:
+The runner builds `Luau.Repl.CLI`, `Luau.UnitTest`, and `Luau.Compile.CLI` without building the unrelated ARM64 FASTCALL-failing targets. It runs the full unit-test suite, generates 20 test inputs, disassembles the switch variants, and benchmarks them using Luau's existing `bench/bench.py` harness with `-O2`.
 
-```bash
-cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build-release --target Luau.Repl.CLI
-```
+The runner generates:
 
-Run the benchmark with the upstream harness:
+- `switch-results.md`: self-contained results table, Base64-embedded PNG graph, and inline text bytecode dumps for all switch sizes. Upload this one file for review.
+- `switch-results.json` and `switch-results.png`: raw measurements and standalone chart.
+- `switch-bytecode/switch-{4,16,64,256,1024}.txt`: individual readable compiler output.
 
-```bash
-python bench/bench.py --folder bench/switch/generated --vm "../build-release/luau.exe -O2" --filename switch-results --absolute
-```
+The upstream benchmark harness can exit successfully even when cases fail. The runner validates measurements before publishing the report. The 1024-case `if/elseif` benchmark currently hits the parser recursion-depth limit; this single known failure is reported rather than silently reducing the case count. Any other missing result fails the run.
 
-`bench.py` performs the repeated measurements, outlier handling, CPU-affinity behavior, JSON output, statistics, and PNG graph using the same machinery as Luau's existing VM benchmarks.
-
-Optionally create a compact Markdown report from the harness JSON:
-
-```bash
-python bench/switch/report.py switch-results.json
-```
-
-This produces `switch-results.md` and embeds `switch-results.png` when the graph exists.
-
-The 1024-case inputs are intentionally a stress case. If an implementation exceeds a compiler/parser limit, that failure should be reported rather than silently reducing the case count.
+This experiment measures VM dispatch under Windows ARM64 when run on CLANGARM64. Results should not be generalized to other architectures without additional measurement.
