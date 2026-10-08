@@ -2,6 +2,8 @@
 # This file is part of the Luau programming language and is licensed under MIT License; see LICENSE.txt for details
 
 import argparse
+import base64
+import re
 import json
 import statistics
 from pathlib import Path
@@ -32,10 +34,13 @@ def main():
     parser.add_argument("results", nargs="?", default="switch-results.json")
     parser.add_argument("--graph", default="switch-results.png")
     parser.add_argument("--output", default="switch-results.md")
+    parser.add_argument("--bytecode-dir", default="switch-bytecode")
     args = parser.parse_args()
 
     rows = load(args.results)
-    sizes = sorted({cases for cases, _ in rows})
+    sizes = (4, 16, 64, 256, 1024)
+    if not rows:
+        raise SystemExit("No successful benchmark measurements found")
 
     out = [
         "# Switch dispatch benchmark",
@@ -55,7 +60,15 @@ def main():
 
     graph = Path(args.graph)
     if graph.exists():
-        out.extend(("", "## Graph", "", f"![Switch benchmark results]({graph.name})"))
+        encoded = base64.b64encode(graph.read_bytes()).decode("ascii")
+        out.extend(("", "## Graph", "", f"![Switch benchmark results](data:image/png;base64,{encoded})"))
+
+    bytecode_dir = Path(args.bytecode_dir)
+    dumps = sorted(bytecode_dir.glob("switch-*.txt"), key=lambda p: int(re.search(r"switch-(\\d+)", p.name).group(1)) if re.search(r"switch-(\\d+)", p.name) else 0) if bytecode_dir.exists() else []
+    if dumps:
+        out.extend(("", "## Switch bytecode", ""))
+        for dump in dumps:
+            out.extend((f"### {dump.stem}", "", "```text", dump.read_text().rstrip(), "```", ""))
 
     Path(args.output).write_text("\n".join(out) + "\n", newline="\n")
     print(args.output)
