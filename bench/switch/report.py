@@ -3,7 +3,6 @@
 
 import argparse
 import base64
-import re
 import json
 import statistics
 from pathlib import Path
@@ -64,7 +63,7 @@ def main():
         out.extend(("", "## Graph", "", f"![Switch benchmark results](data:image/png;base64,{encoded})"))
 
     bytecode_dir = Path(args.bytecode_dir)
-    dumps = sorted(bytecode_dir.glob("switch-*.txt"), key=lambda p: int(re.search(r"switch-(\\d+)", p.name).group(1)) if re.search(r"switch-(\\d+)", p.name) else 0) if bytecode_dir.exists() else []
+    dumps = [bytecode_dir / f"switch-{size}.txt" for size in sizes if (bytecode_dir / f"switch-{size}.txt").is_file()]
     if dumps:
         out.extend(("", "## Switch bytecode", ""))
         for dump in dumps:
