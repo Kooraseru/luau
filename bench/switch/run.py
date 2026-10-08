@@ -33,6 +33,7 @@ def main():
 
     run("cmake", "--build", build, "--target", "Luau.Repl.CLI", "Luau.UnitTest", "Luau.Compile.CLI", "-j", "4")
     run(unit_tests)
+    run(vm, "bench/switch/regression.luau")
     run(sys.executable, "bench/switch/generate.py")
 
     for size in SIZES:
