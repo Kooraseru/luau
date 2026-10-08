@@ -3835,7 +3835,10 @@ struct Compiler
             else
             {
                 RegScope caseRs(this);
-                uint8_t caseReg = compileExprAuto(switchCase.value, caseRs);
+                // Keep dynamic case expressions out of the temporary-top call path.
+                // That path can elide/misplace the function register when a case value is a call.
+                uint8_t caseReg = allocReg(switchCase.value, 1u);
+                compileExpr(switchCase.value, caseReg);
                 bytecode.emitAD(LOP_JUMPIFNOTEQ, subjectReg, 0);
                 bytecode.emitAux(caseReg);
             }
