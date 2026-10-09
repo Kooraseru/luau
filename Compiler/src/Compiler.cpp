@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <array>
 #include <bitset>
+#include <functional>
 
 #include <math.h>
 #include <stdlib.h>
@@ -3791,10 +3792,128 @@ struct Compiler
         }
     }
 
+    struct NumberSwitchCase
+    {
+        double value;
+        size_t index;
+        int32_t constant;
+    };
+
+    // Optimize switches whose labels are exclusively distinct numeric constants.
+    // The numeric VM guard is essential: ordinary < comparisons would otherwise
+    // throw or invoke metamethods for nonnumber switch subjects.
+    bool compileStatSwitchNumberTree(AstStatSwitch* stat, uint8_t subjectReg)
+    {
+        if (options.optimizationLevel < 2 || stat->cases.size < 16)
+            return false;
+
+        std::vector<NumberSwitchCase> cases;
+        cases.reserve(stat->cases.size);
+
+        for (size_t i = 0; i < stat->cases.size; ++i)
+        {
+            Constant constant = getConstant(stat->cases.data[i].value);
+            if (constant.type != Constant::Type_Number || !std::isfinite(constant.valueNumber))
+                return false;
+
+            cases.push_back({constant.valueNumber, i, -1});
+        }
+
+        std::sort(cases.begin(), cases.end(), [](const NumberSwitchCase& a, const NumberSwitchCase& b) {
+            return a.value < b.value;
+        });
+
+        for (size_t i = 1; i < cases.size(); ++i)
+            if (cases[i - 1].value == cases[i].value)
+                return false; // first-match duplicate cases require the linear path
+
+        for (NumberSwitchCase& item : cases)
+            item.constant = getConstantIndex(stat->cases.data[item.index].value);
+
+        RegScope rs(this);
+        uint8_t pivotReg = allocReg(stat, 1u);
+
+        size_t nonNumber = bytecode.emitLabel();
+        bytecode.emitAD(LOP_JUMPIFNOTNUMBER, subjectReg, 0);
+
+        std::vector<size_t> matchJumps(stat->cases.size);
+        std::vector<size_t> missJumps;
+
+        std::function<void(size_t, size_t)> emitTree = [&](size_t begin, size_t end) {
+            if (begin == end)
+            {
+                size_t miss = bytecode.emitLabel();
+                bytecode.emitAD(LOP_JUMP, 0, 0);
+                missJumps.push_back(miss);
+                return;
+            }
+
+            size_t mid = begin + (end - begin) / 2;
+            const NumberSwitchCase& pivot = cases[mid];
+
+            // Jump directly into the original case body on an equality match.
+            matchJumps[pivot.index] = bytecode.emitLabel();
+            bytecode.emitAD(LOP_JUMPXEQKN, subjectReg, 0);
+            bytecode.emitAux(uint32_t(pivot.constant));
+
+            if (end - begin == 1)
+            {
+                size_t miss = bytecode.emitLabel();
+                bytecode.emitAD(LOP_JUMP, 0, 0);
+                missJumps.push_back(miss);
+                return;
+            }
+
+            emitLoadK(pivotReg, pivot.constant);
+            size_t rightJump = bytecode.emitLabel();
+            bytecode.emitAD(LOP_JUMPIFNOTLT, subjectReg, 0);
+            bytecode.emitAux(pivotReg);
+
+            emitTree(begin, mid);
+
+            size_t rightLabel = bytecode.emitLabel();
+            patchJump(stat, rightJump, rightLabel);
+            emitTree(mid + 1, end);
+        };
+
+        emitTree(0, cases.size());
+
+        std::vector<size_t> endJumps;
+        for (size_t i = 0; i < stat->cases.size; ++i)
+        {
+            size_t caseLabel = bytecode.emitLabel();
+            patchJump(stat, matchJumps[i], caseLabel);
+
+            AstStatBlock* body = stat->cases.data[i].body;
+            compileStat(body);
+
+            if (!alwaysTerminates(body))
+            {
+                size_t endJump = bytecode.emitLabel();
+                bytecode.emitAD(LOP_JUMP, 0, 0);
+                endJumps.push_back(endJump);
+            }
+        }
+
+        size_t elseLabel = bytecode.emitLabel();
+        patchJump(stat, nonNumber, elseLabel);
+        patchJumps(stat, missJumps, elseLabel);
+
+        if (stat->elsebody)
+            compileStat(stat->elsebody);
+
+        size_t endLabel = bytecode.emitLabel();
+        patchJumps(stat, endJumps, endLabel);
+        return true;
+    }
+
     void compileStatSwitch(AstStatSwitch* stat)
     {
         RegScope rs(this);
         uint8_t subjectReg = compileExprAuto(stat->subject, rs);
+        if (compileStatSwitchNumberTree(stat, subjectReg))
+            return;
+
         std::vector<size_t> endJumps;
 
         for (const AstStatSwitchCase& switchCase : stat->cases)
