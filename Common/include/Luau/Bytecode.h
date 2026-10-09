@@ -471,6 +471,10 @@ enum LuauOpcode
     // AUX: constant table index of unreified class object
     LOP_NEWCLASS,
 
+    // JUMPIFNOTNUMBER: branch if subject register is not a number.
+    // A: source register; D: signed jump offset. Experimental switch dispatch.
+    LOP_JUMPIFNOTNUMBER,
+
     // Enum entry for number of opcodes, not a valid opcode by itself!
     LOP__COUNT
 };
