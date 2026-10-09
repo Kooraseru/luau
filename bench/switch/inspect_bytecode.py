@@ -8,8 +8,8 @@ from pathlib import Path
 
 SIZES = (4, 16, 64, 256, 1024)
 KINDS = ("switch", "function-table", "table", "if")
-FUNCTION = re.compile(r"^Function \\d+ \\(([^)]+)\\):$")
-OPCODE = re.compile(r"^([A-Z][A-Z0-9_]*)\\b")
+FUNCTION = re.compile(r"^Function \d+ \(([^)]+)\):$")
+OPCODE = re.compile(r"^([A-Z][A-Z0-9_]*)\b")
 
 
 def dispatch_instructions(source):
@@ -23,7 +23,7 @@ def dispatch_instructions(source):
             function_found |= active
             continue
         if active:
-            match = OPCODE.match(re.sub(r"^L\\d+: ", "", line))
+            match = OPCODE.match(re.sub(r"^L\d+: ", "", line))
             if match:
                 insns.append((match.group(1), line))
     if not function_found:
