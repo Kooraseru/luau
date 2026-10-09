@@ -1060,6 +1060,10 @@ struct BytecodeGraphParser
                 break;
 
 
+            case LOP_JUMPXTABLE:
+                // Graph rebuilding rejects indexed dispatch before this visitor.
+                LUAU_UNREACHABLE();
+
             case LOP__COUNT:
                 LUAU_UNREACHABLE();
             }
