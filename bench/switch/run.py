@@ -46,6 +46,8 @@ def main():
                 [str(compiler), "--text", "-O2", f"bench/switch/generated/switch-{size}.luau"],
                 cwd=ROOT, stdout=out, check=True,
             )
+        if size >= 16 and "JUMPIFNOTNUMBER" not in target.read_text(encoding="utf-8"):
+            raise SystemExit(f"Expected optimized numeric switch bytecode in {target}")
 
     # The upstream harness can exit 0 even when individual benchmarks fail.
     # Remove old outputs so an unsuccessful run cannot reuse a stale graph.
