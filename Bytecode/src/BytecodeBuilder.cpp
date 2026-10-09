@@ -2771,6 +2771,10 @@ void BytecodeBuilder::dumpInstruction(const uint32_t* code, std::string& result,
         formatAppend(result, "JUMPIFNOT R%d L%d\n", LUAU_INSN_A(insn), targetLabel);
         break;
 
+    case LOP_JUMPIFNOTNUMBER:
+        formatAppend(result, "JUMPIFNOTNUMBER R%d L%d\n", LUAU_INSN_A(insn), targetLabel);
+        break;
+
     case LOP_JUMPIFEQ:
         formatAppend(result, "JUMPIFEQ R%d R%d L%d\n", LUAU_INSN_A(insn), *code++, targetLabel);
         break;
