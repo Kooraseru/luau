@@ -119,6 +119,8 @@ const char* getLuauOpcodeName(LuauOpcode cmd)
         return "JUMPIFNOT";
     case LOP_JUMPIFNOTNUMBER:
         return "JUMPIFNOTNUMBER";
+    case LOP_JUMPXTABLE:
+        return "JUMPXTABLE";
     case LOP_JUMPIFEQ:
         return "JUMPIFEQ";
     case LOP_JUMPIFLE:

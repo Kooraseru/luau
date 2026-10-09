@@ -278,4 +278,86 @@ check(largeNumericSwitch("5"), -2)
 check(largeNumericSwitch(5), 5)
 type = originalType
 
+-- Mixed empty/value returns ensure indexed branch slots cannot be rewritten
+-- into executable RETURN instructions by bytecode jump folding.
+local function returnDispatch(value)
+    switch value
+        case 0 then return;
+        case 1 then return 1;
+        case 2 then return 2;
+        case 3 then return 3;
+        case 4 then return 4;
+        case 5 then return 5;
+        case 6 then return 6;
+        case 7 then return;
+        case 8 then return 8;
+        case 9 then return 9;
+        case 10 then return 10;
+        case 11 then return 11;
+        case 12 then return 12;
+        case 13 then return 13;
+        case 14 then return;
+        case 15 then return 15;
+        case 16 then return 16;
+        case 17 then return 17;
+        case 18 then return 18;
+        case 19 then return 19;
+        case 20 then return 20;
+        case 21 then return;
+        case 22 then return 22;
+        case 23 then return 23;
+        case 24 then return 24;
+        case 25 then return 25;
+        case 26 then return 26;
+        case 27 then return 27;
+        case 28 then return;
+        case 29 then return 29;
+        case 30 then return 30;
+        case 31 then return 31;
+        case 32 then return 32;
+        case 33 then return 33;
+        case 34 then return 34;
+        case 35 then return;
+        case 36 then return 36;
+        case 37 then return 37;
+        case 38 then return 38;
+        case 39 then return 39;
+        case 40 then return 40;
+        case 41 then return 41;
+        case 42 then return;
+        case 43 then return 43;
+        case 44 then return 44;
+        case 45 then return 45;
+        case 46 then return 46;
+        case 47 then return 47;
+        case 48 then return 48;
+        case 49 then return;
+        case 50 then return 50;
+        case 51 then return 51;
+        case 52 then return 52;
+        case 53 then return 53;
+        case 54 then return 54;
+        case 55 then return 55;
+        case 56 then return;
+        case 57 then return 57;
+        case 58 then return 58;
+        case 59 then return 59;
+        case 60 then return 60;
+        case 61 then return 61;
+        case 62 then return 62;
+        case 63 then return;
+        else return -1
+    end
+end
+
+for i = 0, 63 do
+    if i % 7 == 0 then
+        check(returnDispatch(i), nil)
+    else
+        check(returnDispatch(i), i)
+    end
+end
+check(returnDispatch(64), -1)
+check(returnDispatch("7"), -1)
+
 print("switch dispatch regression checks passed")

@@ -49,7 +49,7 @@ def main():
                     [str(compiler), "--text", "-O2", f"bench/switch/generated/{kind}-{size}.luau"],
                     cwd=ROOT, stdout=out, check=True,
                 )
-            if kind == "switch" and size >= 64 and "JUMPIFNOTNUMBER" not in target.read_text(encoding="utf-8"):
+            if kind == "switch" and size >= 64 and "JUMPXTABLE" not in target.read_text(encoding="utf-8"):
                 raise SystemExit(f"Expected optimized numeric switch bytecode in {target}")
 
     run(sys.executable, "bench/switch/inspect_bytecode.py")

@@ -130,7 +130,7 @@ LUAU_FASTFLAGVARIABLE(LuauFastpcallInterrupt)
         VM_DISPATCH_OP(LOP_JUMPXEQKB), VM_DISPATCH_OP(LOP_JUMPXEQKN), VM_DISPATCH_OP(LOP_JUMPXEQKS), VM_DISPATCH_OP(LOP_IDIV), \
         VM_DISPATCH_OP(LOP_IDIVK), VM_DISPATCH_OP(LOP_GETUDATAKS), VM_DISPATCH_OP(LOP_SETUDATAKS), VM_DISPATCH_OP(LOP_NAMECALLUDATA), \
         VM_DISPATCH_OP(LOP_NEWCLASSMEMBER), VM_DISPATCH_OP(LOP_CALLFB), VM_DISPATCH_OP(LOP_CMPPROTO), VM_DISPATCH_OP(LOP_FASTPCALL), \
-        VM_DISPATCH_OP(LOP_NEWCLASS), VM_DISPATCH_OP(LOP_JUMPIFNOTNUMBER),
+        VM_DISPATCH_OP(LOP_NEWCLASS), VM_DISPATCH_OP(LOP_JUMPIFNOTNUMBER), VM_DISPATCH_OP(LOP_JUMPXTABLE),
 
 #if defined(__GNUC__) || defined(__clang__)
 #define VM_USE_CGOTO 1
@@ -1355,6 +1355,31 @@ reentry:
                 VM_CASE_STKID ra = VM_REG(LUAU_INSN_A(insn));
 
                 pc += !ttisnumber(ra) ? LUAU_INSN_D(insn) : 0;
+                VM_ASSERT_PC(pc);
+                VM_NEXT();
+            }
+
+            VM_CASE(LOP_JUMPXTABLE)
+            {
+                VM_CASE_INSTRUCTION insn = *pc++;
+                int32_t first = int32_t(*pc++);
+                uint32_t length = *pc++;
+                VM_CASE_STKID ra = VM_REG(LUAU_INSN_A(insn));
+
+                if (ttisnumber(ra))
+                {
+                    double index = nvalue(ra) - double(first);
+                    if (index >= 0.0 && index < double(length) && index == double(uint32_t(index)))
+                    {
+                        const Instruction* slot = pc + uint32_t(index);
+                        LUAU_ASSERT(LUAU_INSN_OP(*slot) == LOP_JUMPX);
+                        pc = slot + 1 + LUAU_INSN_E(*slot);
+                        VM_ASSERT_PC(pc);
+                        VM_NEXT();
+                    }
+                }
+
+                pc += length;
                 VM_ASSERT_PC(pc);
                 VM_NEXT();
             }

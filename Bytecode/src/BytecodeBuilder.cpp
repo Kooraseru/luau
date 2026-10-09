@@ -221,6 +221,7 @@ void BytecodeBuilder::clearState()
     constants.clear();
     protos.clear();
     jumps.clear();
+    tableJumps.clear();
 
     if (FFlag::LuauCompileRefactorFeedback)
         fbSlots.clear();
@@ -282,6 +283,7 @@ void BytecodeBuilder::endFunction(uint8_t maxstacksize, uint8_t numupvalues, uin
         constants.clear();
         protos.clear();
         jumps.clear();
+        tableJumps.clear();
 
         if (FFlag::LuauCompileRefactorFeedback)
             fbSlots.clear();
@@ -549,6 +551,8 @@ int32_t BytecodeBuilder::addClassShape(ClassShape shape)
 
 void BytecodeBuilder::emitABC(LuauOpcode op, uint8_t a, uint8_t b, uint8_t c)
 {
+    if (op == LOP_JUMPXTABLE)
+        usesJumpTable = true;
     uint32_t insn = uint32_t(op) | (a << 8) | (b << 16) | (c << 24);
 
     insns.push_back(insn);
@@ -664,6 +668,20 @@ bool BytecodeBuilder::patchJumpD(size_t jumpLabel, size_t targetLabel)
     }
 
     jumps.push_back({uint32_t(jumpLabel), uint32_t(targetLabel)});
+    return true;
+}
+
+bool BytecodeBuilder::patchTableJump(size_t slotLabel, size_t targetLabel)
+{
+    LUAU_ASSERT(slotLabel < insns.size() && targetLabel <= insns.size());
+    LUAU_ASSERT(LUAU_INSN_OP(insns[slotLabel]) == LOP_JUMPX);
+
+    int64_t offset = int64_t(targetLabel) - int64_t(slotLabel) - 1;
+    if (offset < -(int64_t(1) << 23) || offset >= (int64_t(1) << 23))
+        return false;
+
+    insns[slotLabel] = uint32_t(LOP_JUMPX) | (uint32_t(offset) << 8);
+    tableJumps.push_back({uint32_t(slotLabel), uint32_t(targetLabel)});
     return true;
 }
 
@@ -1527,6 +1545,20 @@ std::vector<uint32_t> BytecodeBuilder::expandJumps(bool& hasLongJumpError)
     }
 
     LUAU_ASSERT(pendingTrampolines == 0);
+    // The indexed jump table is a contiguous run of one-word JUMPX slots.
+    // Rebase each slot when ordinary jumps elsewhere need trampolines; no
+    // trampoline may be inserted in the table itself.
+    for (const Jump& jump : tableJumps)
+    {
+        int64_t offset = int64_t(remap[jump.target]) - int64_t(remap[jump.source]) - 1;
+        if (offset < -(int64_t(1) << 23) || offset >= (int64_t(1) << 23))
+        {
+            hasLongJumpError = true;
+            return {};
+        }
+        newinsns[remap[jump.source]] = uint32_t(LOP_JUMPX) | (uint32_t(offset) << 8);
+    }
+
 
     // this was hard, but we're done.
     insns.swap(newinsns);
@@ -1567,8 +1599,11 @@ std::string BytecodeBuilder::getError(const std::string& message)
     return result;
 }
 
-uint8_t BytecodeBuilder::getVersion()
+uint8_t BytecodeBuilder::getVersion() const
 {
+    if (usesJumpTable)
+        return 15;
+
     if (FFlag::DebugLuauUserDefinedClasses)
         return LBC_VERSION_CLASSES;
 
@@ -1790,6 +1825,14 @@ void BytecodeBuilder::validateInstructions() const
         case LOP_JUMPIFNOTNUMBER:
             VREG(LUAU_INSN_A(insn));
             VJUMP(LUAU_INSN_D(insn));
+            break;
+
+        case LOP_JUMPXTABLE:
+            VREG(LUAU_INSN_A(insn));
+            LUAU_ASSERT(i + 2 < insns.size());
+            LUAU_ASSERT(insns[i + 2] <= insns.size() - i - 3);
+            for (size_t k = 0; k < insns[i + 2]; ++k)
+                LUAU_ASSERT(LUAU_INSN_OP(insns[i + 3 + k]) == LOP_JUMPX);
             break;
 
         case LOP_JUMPIFEQ:
@@ -2773,6 +2816,11 @@ void BytecodeBuilder::dumpInstruction(const uint32_t* code, std::string& result,
 
     case LOP_JUMPIFNOTNUMBER:
         formatAppend(result, "JUMPIFNOTNUMBER R%d L%d\n", LUAU_INSN_A(insn), targetLabel);
+        break;
+
+    case LOP_JUMPXTABLE:
+        formatAppend(result, "JUMPXTABLE R%d base=%d count=%u\n", LUAU_INSN_A(insn), int32_t(code[0]), code[1]);
+        code += 2;
         break;
 
     case LOP_JUMPIFEQ:

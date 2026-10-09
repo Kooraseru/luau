@@ -104,6 +104,7 @@ public:
     size_t emitLabel();
 
     [[nodiscard]] bool patchJumpD(size_t jumpLabel, size_t targetLabel);
+    [[nodiscard]] bool patchTableJump(size_t slotLabel, size_t targetLabel);
     [[nodiscard]] bool patchSkipC(size_t jumpLabel, size_t targetLabel);
 
     void patchAux(size_t targetAux, int32_t newValue);
@@ -197,7 +198,7 @@ public:
 
     static std::string getError(const std::string& message);
 
-    static uint8_t getVersion();
+    uint8_t getVersion() const;
     static uint8_t getTypeEncodingVersion();
 
 protected:
@@ -334,6 +335,7 @@ protected:
     std::vector<Constant> constants;
     std::vector<uint32_t> protos;
     std::vector<Jump> jumps;
+    std::vector<Jump> tableJumps;
 
     std::vector<TableShape> tableShapes;
     std::vector<ClassShape> classShapes;
@@ -355,6 +357,7 @@ protected:
     std::vector<uint32_t> fbSlots_DEPRECATED;
 
     bool hasLongJumps = false;
+    bool usesJumpTable = false;
 
     DenseHashMap<ConstantKey, int32_t, ConstantKeyHash> constantMap;
     DenseHashMap<TableShape, int32_t, TableShapeHash> tableShapeMap;
