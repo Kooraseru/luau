@@ -63,6 +63,9 @@ def main():
         out.extend(("", "## Graph", "", f"![Switch benchmark results](data:image/png;base64,{encoded})"))
 
     bytecode_dir = Path(args.bytecode_dir)
+    comparison = bytecode_dir / "comparison.md"
+    if comparison.is_file():
+        out.extend(("", "## Bytecode comparison", "", comparison.read_text(encoding="utf-8")))
     dumps = [bytecode_dir / f"switch-{size}.txt" for size in sizes if (bytecode_dir / f"switch-{size}.txt").is_file()]
     if dumps:
         out.extend(("", "## Switch bytecode", ""))
