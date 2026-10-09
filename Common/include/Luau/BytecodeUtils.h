@@ -73,6 +73,7 @@ inline bool isJumpD(LuauOpcode op)
     case LOP_JUMP:
     case LOP_JUMPIF:
     case LOP_JUMPIFNOT:
+    case LOP_JUMPIFNOTNUMBER:
     case LOP_JUMPIFEQ:
     case LOP_JUMPIFLE:
     case LOP_JUMPIFLT:
