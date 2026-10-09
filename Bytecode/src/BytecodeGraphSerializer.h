@@ -464,6 +464,7 @@ struct BytecodeGraphSerializer
             break;
 
         case LOP_JUMPIFNOT:
+        case LOP_JUMPIFNOTNUMBER:
         case LOP_JUMPIF:
             recordJump(insn, 1);
             bcb.emitAD(insn.op, getRegInput(insn, 0), 0);
@@ -679,6 +680,10 @@ struct BytecodeGraphSerializer
 
             bcb.emitAux(getVmConstInputAux(insn, 2));
             break;
+
+        case LOP_JUMPXTABLE:
+            // Graph rebuilding rejects indexed dispatch before serialization.
+            LUAU_UNREACHABLE();
 
         case LOP__COUNT:
             LUAU_UNREACHABLE();

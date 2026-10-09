@@ -132,6 +132,36 @@ struct ValueVisitor : AstVisitor
         return true;
     }
 
+    bool visit(AstStatSwitch* node) override
+    {
+        if (FFlag::LuauCompileReuseLocalRegs)
+        {
+            // Switch case expressions are evaluated conditionally, not as ordinary
+            // sequential statements. Keep their referenced locals live through the
+            // complete dispatch rather than permitting lexical register recycling.
+            struct PreserveCaseLocals : AstVisitor
+            {
+                DenseHashMap<AstLocal*, Variable>& variables;
+
+                explicit PreserveCaseLocals(DenseHashMap<AstLocal*, Variable>& variables)
+                    : variables(variables)
+                {
+                }
+
+                bool visit(AstExprLocal* expr) override
+                {
+                    variables[expr->local].nonLexicalUse = true;
+                    return false;
+                }
+            } preserve{variables};
+
+            for (const AstStatSwitchCase& switchCase : node->cases)
+                switchCase.value->visit(&preserve);
+        }
+
+        return true;
+    }
+
     bool visit(AstStatIf* node) override
     {
         if (node->conditionLocal)

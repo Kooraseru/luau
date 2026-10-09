@@ -477,6 +477,16 @@ struct BytecodeGraphParser
 
     bool rebuildGraph(const Instruction code[], uint32_t codesize, std::vector<uint32_t>& lines, std::vector<uint32_t>& pcs)
     {
+        // Indexed jumps cannot be represented by the current basic-block graph.
+        // Decline a rewrite rather than accidentally treating branch slots as
+        // executable fallthrough or dropping their dynamic edges.
+        for (uint32_t pc = 0; pc < codesize;)
+        {
+            LuauOpcode op = LuauOpcode(LUAU_INSN_OP(code[pc]));
+            if (op == LOP_JUMPXTABLE)
+                return false;
+            pc += getOpLength(op);
+        }
         size_t instructionsCount = rebuildBlocks(code, codesize);
         if (blockByPC.size() > kMaxCFGBlocks)
             return false;
@@ -545,6 +555,7 @@ struct BytecodeGraphParser
 
                 case LOP_JUMPIF:
                 case LOP_JUMPIFNOT:
+                case LOP_JUMPIFNOTNUMBER:
                     addVmRegInput(node, LUAU_INSN_A(insn));
                     addJumpInput(node, jumpTarget);
                     break;
@@ -821,6 +832,7 @@ struct BytecodeGraphParser
             case LOP_JUMPXEQKS:
             case LOP_JUMPIF:
             case LOP_JUMPIFNOT:
+            case LOP_JUMPIFNOTNUMBER:
             case LOP_JUMPIFEQ:
             case LOP_JUMPIFLE:
             case LOP_JUMPIFLT:
@@ -1047,6 +1059,10 @@ struct BytecodeGraphParser
                 addProducer(LUAU_INSN_A(insn), nodeOp);
                 break;
 
+
+            case LOP_JUMPXTABLE:
+                // Graph rebuilding rejects indexed dispatch before this visitor.
+                LUAU_UNREACHABLE();
 
             case LOP__COUNT:
                 LUAU_UNREACHABLE();

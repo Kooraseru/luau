@@ -21,3 +21,20 @@ __pycache__
 
 # Golden-test captured outputs for user debugging
 *.output.tmp
+
+# Python bytecode/cache
+__pycache__/
+*.py[cod]
+
+# Generated switch benchmarks
+/bench/switch/generated/
+
+# Switch benchmark results
+/switch-results.json
+/switch-results.md
+/switch-results.png
+/switch-bytecode/
+
+# Temporary disassembly/debugging files
+/switch-O1.txt
+/control-O1.txt

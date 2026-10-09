@@ -33,16 +33,26 @@ def main():
 
     run("cmake", "--build", build, "--target", "Luau.Repl.CLI", "Luau.UnitTest", "Luau.Compile.CLI", "-j", "4")
     run(unit_tests)
+    for optimization in ("-O1", "-O2"):
+        run(vm, optimization, "bench/switch/dynamic-case-repro.luau")
+        run(vm, optimization, "bench/switch/regression.luau")
     run(sys.executable, "bench/switch/generate.py")
 
     for size in SIZES:
-        target = bytecode / f"switch-{size}.txt"
-        print(f"Disassembling switch-{size} -> {target.name}", flush=True)
-        with target.open("w", encoding="utf-8") as out:
-            subprocess.run(
-                [str(compiler), "--text", "-O2", f"bench/switch/generated/switch-{size}.luau"],
-                cwd=ROOT, stdout=out, check=True,
-            )
+        for kind in KINDS:
+            if (size, kind) == KNOWN_LIMIT:
+                continue
+            target = bytecode / f"{kind}-{size}.txt"
+            print(f"Disassembling {kind}-{size} -> {target.name}", flush=True)
+            with target.open("w", encoding="utf-8") as out:
+                subprocess.run(
+                    [str(compiler), "--text", "-O2", f"bench/switch/generated/{kind}-{size}.luau"],
+                    cwd=ROOT, stdout=out, check=True,
+                )
+            if kind == "switch" and size >= 64 and "JUMPXTABLE" not in target.read_text(encoding="utf-8"):
+                raise SystemExit(f"Expected optimized numeric switch bytecode in {target}")
+
+    run(sys.executable, "bench/switch/inspect_bytecode.py")
 
     # The upstream harness can exit 0 even when individual benchmarks fail.
     # Remove old outputs so an unsuccessful run cannot reuse a stale graph.
