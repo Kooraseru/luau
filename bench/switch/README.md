@@ -26,7 +26,7 @@ The current compiler emits a linear chain of equality comparisons. A balanced nu
 
 ## Experimental optimized numeric dispatch
 
-At optimization level `-O2`, switches with at least 16 distinct, finite numeric constant case values now use a balanced comparison tree rather than source-order linear comparisons. Other switches, including all dynamic case expressions, mixed value types, and duplicate numeric labels, retain the previous dispatch implementation.
+At optimization level `-O2`, switches with at least 64 distinct, finite numeric constant case values now use a balanced comparison tree rather than source-order linear comparisons. Other switches, including all dynamic case expressions, mixed value types, and duplicate numeric labels, retain the previous dispatch implementation.
 
 The numeric tree uses the experimental `LOP_JUMPIFNOTNUMBER` opcode to avoid numeric ordering comparisons on strings, tables, booleans, nil, and other nonnumeric subjects. This is a **fork-specific bytecode extension**: bytecode emitted by this branch for optimized switches is **not compatible with unmodified Luau VMs**. Do not merge upstream or publish bytecode using this instruction without an explicit opcode/versioning compatibility plan and integration in native CodeGen and other bytecode consumers.
 
