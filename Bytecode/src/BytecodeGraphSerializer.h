@@ -464,6 +464,7 @@ struct BytecodeGraphSerializer
             break;
 
         case LOP_JUMPIFNOT:
+        case LOP_JUMPIFNOTNUMBER:
         case LOP_JUMPIF:
             recordJump(insn, 1);
             bcb.emitAD(insn.op, getRegInput(insn, 0), 0);
