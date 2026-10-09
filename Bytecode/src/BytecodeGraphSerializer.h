@@ -681,6 +681,10 @@ struct BytecodeGraphSerializer
             bcb.emitAux(getVmConstInputAux(insn, 2));
             break;
 
+        case LOP_JUMPXTABLE:
+            // Graph rebuilding rejects indexed dispatch before serialization.
+            LUAU_UNREACHABLE();
+
         case LOP__COUNT:
             LUAU_UNREACHABLE();
         }
