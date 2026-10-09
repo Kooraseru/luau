@@ -1787,6 +1787,7 @@ void BytecodeBuilder::validateInstructions() const
 
         case LOP_JUMPIF:
         case LOP_JUMPIFNOT:
+        case LOP_JUMPIFNOTNUMBER:
             VREG(LUAU_INSN_A(insn));
             VJUMP(LUAU_INSN_D(insn));
             break;
