@@ -3799,7 +3799,7 @@ struct Compiler
 
         for (const AstStatSwitchCase& switchCase : stat->cases)
         {
-            size_t nextCase = bytecode.emitLabel();
+            size_t nextCase;
             Constant constant = getConstant(switchCase.value);
             LuauOpcode constantJump = LOP_NOP;
             int32_t cid = -1;
@@ -3829,6 +3829,7 @@ struct Compiler
             if (constantJump != LOP_NOP && cid >= 0)
             {
                 // Jump to the next case when the subject does not equal this constant.
+                nextCase = bytecode.emitLabel();
                 bytecode.emitAD(constantJump, subjectReg, 0);
                 bytecode.emitAux(uint32_t(cid) | 0x80000000u);
             }
@@ -3836,6 +3837,7 @@ struct Compiler
             {
                 RegScope caseRs(this);
                 uint8_t caseReg = compileExprAuto(switchCase.value, caseRs);
+                nextCase = bytecode.emitLabel();
                 bytecode.emitAD(LOP_JUMPIFNOTEQ, subjectReg, 0);
                 bytecode.emitAux(caseReg);
             }
