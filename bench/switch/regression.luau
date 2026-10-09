@@ -104,4 +104,64 @@ local case = 8
 local switch = {case = case}
 check(switch.case, 8)
 
+
+-- A 32-way all-numeric switch exercises the optimized dispatch at -O2.
+-- Non-number subjects must miss without invoking numeric comparison metamethods.
+local function largeNumericSwitch(value)
+    local selected = -1
+    switch value
+    case 0 then selected = 0
+    case 1 then selected = 1
+    case 2 then selected = 2
+    case 3 then selected = 3
+    case 4 then selected = 4
+    case 5 then selected = 5
+    case 6 then selected = 6
+    case 7 then selected = 7
+    case 8 then selected = 8
+    case 9 then selected = 9
+    case 10 then selected = 10
+    case 11 then selected = 11
+    case 12 then selected = 12
+    case 13 then selected = 13
+    case 14 then selected = 14
+    case 15 then selected = 15
+    case 16 then selected = 16
+    case 17 then selected = 17
+    case 18 then selected = 18
+    case 19 then selected = 19
+    case 20 then selected = 20
+    case 21 then selected = 21
+    case 22 then selected = 22
+    case 23 then selected = 23
+    case 24 then selected = 24
+    case 25 then selected = 25
+    case 26 then selected = 26
+    case 27 then selected = 27
+    case 28 then selected = 28
+    case 29 then selected = 29
+    case 30 then selected = 30
+    case 31 then selected = 31
+    else selected = -2
+    end
+    return selected
+end
+
+for i = 0, 31 do
+    check(largeNumericSwitch(i), i)
+end
+for _, value in {"10", true, false, {}, 0.5, -1, 32, math.huge} do
+    check(largeNumericSwitch(value), -2)
+end
+check(largeNumericSwitch(0 / 0), -2)
+
+-- The type guard must be intrinsic, not a Lua call to a mutable global.
+local originalType = type
+type = function()
+    error("switch must not call type")
+end
+check(largeNumericSwitch("5"), -2)
+check(largeNumericSwitch(5), 5)
+type = originalType
+
 print("switch dispatch regression checks passed")
