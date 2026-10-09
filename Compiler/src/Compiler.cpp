@@ -3805,7 +3805,7 @@ struct Compiler
     // throw or invoke metamethods for nonnumber switch subjects.
     bool compileStatSwitchNumberTree(AstStatSwitch* stat, uint8_t subjectReg)
     {
-        if (options.optimizationLevel < 2 || stat->cases.size < 16)
+        if (options.optimizationLevel < 2 || stat->cases.size < 64)
             return false;
 
         std::vector<NumberSwitchCase> cases;
