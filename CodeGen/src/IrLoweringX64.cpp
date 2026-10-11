@@ -1720,7 +1720,7 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         ScopedRegX64 target{regs, SizeX64::qword};
         Label table;
         build.lea(target.reg, table);
-        build.lea(target.reg, qword[target.reg + qwordReg(regOp(OP_A(inst))) * 8]);
+        build.lea(target.reg, addr[target.reg + qwordReg(regOp(OP_A(inst))) * 8]);
         build.jmp(target.reg);
         build.setLabel(table);
         for (size_t i = 1; i < inst.ops.size(); ++i)
