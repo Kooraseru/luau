@@ -255,6 +255,8 @@ protected:
     struct Function
     {
         std::string data;
+        // Required if a later proto promotes the whole module to switch bytecode.
+        std::string versionExtras;
 
         uint8_t maxstacksize = 0;
         uint8_t numparams = 0;
@@ -358,6 +360,7 @@ protected:
 
     bool hasLongJumps = false;
     bool usesJumpTable = false;
+    bool usesSelectN = false;
 
     DenseHashMap<ConstantKey, int32_t, ConstantKeyHash> constantMap;
     DenseHashMap<TableShape, int32_t, TableShapeHash> tableShapeMap;

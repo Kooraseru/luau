@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # This file is part of the Luau programming language and is licensed under MIT License; see LICENSE.txt for details
 
-from pathlib import Path
+from paths import ARTIFACTS
 
 SIZES = (4, 16, 64, 256, 1024)
 KINDS = ("if", "switch", "table", "function-table")
 ITERATIONS = 2_000_000
-OUT = Path(__file__).resolve().parent / "generated"
+OUT = ARTIFACTS / "generated"
 
 
 def expected_checksum(size):
@@ -68,12 +68,13 @@ bench.runCode(test, "{kind}-{size}")
 '''
 
 
-OUT.mkdir(parents=True, exist_ok=True)
-for old in OUT.glob("*.luau"):
-    old.unlink()
+if __name__ == "__main__":
+    OUT.mkdir(parents=True, exist_ok=True)
+    for old in OUT.glob("*.luau"):
+        old.unlink()
 
-for size in SIZES:
-    for kind in KINDS:
-        (OUT / f"{kind}-{size}.luau").write_text(source(kind, size), newline="\n")
+    for size in SIZES:
+        for kind in KINDS:
+            (OUT / f"{kind}-{size}.luau").write_text(source(kind, size), newline="\n")
 
-print(f"generated {len(SIZES) * len(KINDS)} switch benchmarks in {OUT}")
+    print(f"generated {len(SIZES) * len(KINDS)} switch benchmarks in {OUT}")

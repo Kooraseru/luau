@@ -360,4 +360,75 @@ end
 check(returnDispatch(64), -1)
 check(returnDispatch("7"), -1)
 
+-- Constant-subject selection must preserve case-expression side effects.
+order = {}
+switch 2
+    case {caseValue(1)} then selected = "table"
+    case 2 then selected = "number"
+end
+check(selected, "number")
+check(table.concat(order, ","), "1")
+
+order = {}
+switch 2
+    case 2 then selected = "first"
+    case caseValue(2) then selected = "dynamic"
+end
+check(selected, "first")
+check(table.concat(order, ","), "")
+
+-- Exercise strategy boundaries, holes, odd tree partitions and fractional labels.
+-- The CLI's loadstring uses the same optimization level as this regression run.
+for _, count in {23, 24, 31, 32, 33, 64, 65, 129} do
+    for _, stride in {1, 2, 3} do
+        local fraction = stride == 3 and 0.5 or 0
+        local source = {"return function(value) local result = -1 switch value"}
+        for i = 0, count - 1 do
+            local index = (i * 73) % count
+            local key = (index - count // 2) * stride + fraction
+            table.insert(source, string.format("case %.17g then result = %d", key, index))
+        end
+        table.insert(source, "else result = -1 end return result end")
+        local dispatch = assert(loadstring(table.concat(source, "\n")))()
+        for i = 0, count - 1 do
+            local key = (i - count // 2) * stride + fraction
+            check(dispatch(key), i)
+            check(dispatch(key + 0.25), -1)
+        end
+        for _, value in {true, false, "0", {}, math.huge, -math.huge, 0 / 0, -10000, 10000} do
+            check(dispatch(value), -1)
+        end
+        check(dispatch(nil), -1)
+        check(dispatch(setmetatable({}, {__lt = function() error("unexpected ordering") end})), -1)
+        if fraction == 0 then
+            check(dispatch(-1 / math.huge), count // 2)
+        end
+    end
+end
+
+-- Exercise both selected values and rejection paths through loadstring's current compile options.
+for _, output in {"32767", "-32768", "false", "nil", "'answer'", "40000", "1.5"} do
+    local source = {"return function(value) local result = 99 switch value"}
+    for i = 0, 23 do
+        table.insert(source, string.format("case %d then result = %s", i, output))
+    end
+    table.insert(source, "else result = -7 end return result end")
+    local dispatch = assert(loadstring(table.concat(source, "\n")))()
+    local expected = assert(loadstring("return " .. output))()
+    for i = 0, 23 do check(dispatch(i), expected) end
+    for _, value in {false, true, "0", {}, 0.5, -1, 24, math.huge, -math.huge, 0 / 0} do check(dispatch(value), -7) end
+    check(dispatch(nil), -7)
+    check(dispatch(-1 / math.huge), expected)
+end
+
+-- A destination can also be the subject; its old value must be read before assignment.
+do
+    local source = {"return function(value) switch value"}
+    for i = 0, 23 do table.insert(source, string.format("case %d then value = %d", i, 23 - i)) end
+    table.insert(source, "else value = -7 end return value end")
+    local dispatch = assert(loadstring(table.concat(source, "\n")))()
+    for i = 0, 23 do check(dispatch(i), 23 - i) end
+    check(dispatch(nil), -7)
+end
+
 print("switch dispatch regression checks passed")

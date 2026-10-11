@@ -20,7 +20,7 @@ namespace Compile
 
 constexpr size_t kConstantFoldStringLimit = 4096;
 
-static bool constantsEqual(const Constant& la, const Constant& ra)
+bool constantsEqual(const Constant& la, const Constant& ra)
 {
     LUAU_ASSERT(la.type != Constant::Type_Unknown && ra.type != Constant::Type_Unknown);
 

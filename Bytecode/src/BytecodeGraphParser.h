@@ -483,7 +483,7 @@ struct BytecodeGraphParser
         for (uint32_t pc = 0; pc < codesize;)
         {
             LuauOpcode op = LuauOpcode(LUAU_INSN_OP(code[pc]));
-            if (op == LOP_JUMPXTABLE)
+            if (op == LOP_JUMPXTABLE || op == LOP_SELECTN)
                 return false;
             pc += getOpLength(op);
         }
@@ -1060,6 +1060,7 @@ struct BytecodeGraphParser
                 break;
 
 
+            case LOP_SELECTN:
             case LOP_JUMPXTABLE:
                 // Graph rebuilding rejects indexed dispatch before this visitor.
                 LUAU_UNREACHABLE();

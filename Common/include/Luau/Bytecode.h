@@ -55,6 +55,8 @@
 // Version 12: Adds cost function serialized for proto and prepend each proto with size in bytes. Experimental.
 // Version 13: Adds support for double-precision vector constants. Experimental.
 // Version 14: Adds FASTPCALL. Currently supported.
+// Version 15: Adds experimental JUMPXTABLE integer dispatch in this fork.
+// Version 16: Adds experimental SELECTN integer value selection in this fork.
 
 // WIP Versions: Used for in-progress features that might require multiple changes to bytecode. Since these versions are higher than the non-WIP versions, they are responsible for maintaining compatibility with them. For example, tests exercising WIP bytecode versions may need to enable flags for unreleased but non-WIP bytecode versions.
 // Version 100: Adds NEWCLASS for use with Luau Classes. Future class-related bytecode changes should go in this version before release. Experimental.
@@ -480,6 +482,13 @@ enum LuauOpcode
     // many one-word JUMPX instructions serving as branch slots.
     LOP_JUMPXTABLE,
 
+    // Experimental dense integer value selection.
+    // A: destination register; B: subject register; C: reserved (zero).
+    // AUX: signed minimum key, unsigned slot count, signed 16-bit default value.
+    // Followed by count one-word LOADN slots used as data, not executed.
+    // Nonintegral, nonnumeric and out-of-range subjects select the default.
+    LOP_SELECTN,
+
     // Enum entry for number of opcodes, not a valid opcode by itself!
     LOP__COUNT
 };
@@ -528,7 +537,7 @@ enum LuauBytecodeTag
 {
     // Bytecode version; runtime supports [MIN, MAX], compiler emits TARGET by default but may emit a higher version when flags are enabled
     LBC_VERSION_MIN = 3,
-    LBC_VERSION_MAX = 15,
+    LBC_VERSION_MAX = 16,
     LBC_VERSION_TARGET = 9,
     LBC_VERSION_CLASSES = 100,
     // Type encoding version

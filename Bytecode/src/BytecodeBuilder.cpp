@@ -269,6 +269,17 @@ void BytecodeBuilder::endFunction(uint8_t maxstacksize, uint8_t numupvalues, uin
 
     writeFunction(func.data, currentFunction, flags, cost);
 
+    // The module version can be promoted after an earlier child was serialized.
+    // Save fields required by version >= 12 when the feature flags emitted an older layout.
+    if (!(FFlag::LuauBytecodeCostModel || FFlag::LuauCompileEmitVectorDouble || FFlag::LuauCompileFastpcall ||
+            FFlag::DebugLuauUserDefinedClasses))
+    {
+        if (!FFlag::LuauEmitCallFeedback)
+            writeVarInt(func.versionExtras, 0);
+        if ((flags & LPF_INLINABLE) != 0)
+            writeVarInt(func.versionExtras, cost);
+    }
+
     currentFunction = ~0u;
 
     totalInstructionCount += insns.size();
@@ -553,6 +564,8 @@ void BytecodeBuilder::emitABC(LuauOpcode op, uint8_t a, uint8_t b, uint8_t c)
 {
     if (op == LOP_JUMPXTABLE)
         usesJumpTable = true;
+    if (op == LOP_SELECTN)
+        usesSelectN = true;
     uint32_t insn = uint32_t(op) | (a << 8) | (b << 16) | (c << 24);
 
     insns.push_back(insn);
@@ -880,9 +893,11 @@ void BytecodeBuilder::finalize()
 
     for (const Function& func : functions)
     {
-        if (FFlag::LuauBytecodeCostModel || FFlag::LuauCompileEmitVectorDouble || FFlag::LuauCompileFastpcall || FFlag::DebugLuauUserDefinedClasses)
-            writeVarInt(bytecode, func.data.size());
+        if (version >= 12)
+            writeVarInt(bytecode, func.data.size() + func.versionExtras.size());
         bytecode += func.data;
+        if (version >= 12)
+            bytecode += func.versionExtras;
     }
 
     LUAU_ASSERT(mainFunction < functions.size());
@@ -1601,6 +1616,8 @@ std::string BytecodeBuilder::getError(const std::string& message)
 
 uint8_t BytecodeBuilder::getVersion() const
 {
+    if (usesSelectN)
+        return 16;
     if (usesJumpTable)
         return 15;
 
@@ -1825,6 +1842,17 @@ void BytecodeBuilder::validateInstructions() const
         case LOP_JUMPIFNOTNUMBER:
             VREG(LUAU_INSN_A(insn));
             VJUMP(LUAU_INSN_D(insn));
+            break;
+
+        case LOP_SELECTN:
+            VREG(LUAU_INSN_A(insn));
+            VREG(LUAU_INSN_B(insn));
+            LUAU_ASSERT(LUAU_INSN_C(insn) == 0);
+            LUAU_ASSERT(i + 3 < insns.size());
+            LUAU_ASSERT(int32_t(insns[i + 3]) >= INT16_MIN && int32_t(insns[i + 3]) <= INT16_MAX);
+            LUAU_ASSERT(insns[i + 2] > 0 && insns[i + 2] <= 4096 && insns[i + 2] <= insns.size() - i - 4);
+            for (size_t k = 0; k < insns[i + 2]; ++k)
+                LUAU_ASSERT(LUAU_INSN_OP(insns[i + 4 + k]) == LOP_LOADN);
             break;
 
         case LOP_JUMPXTABLE:
@@ -2816,6 +2844,11 @@ void BytecodeBuilder::dumpInstruction(const uint32_t* code, std::string& result,
 
     case LOP_JUMPIFNOTNUMBER:
         formatAppend(result, "JUMPIFNOTNUMBER R%d L%d\n", LUAU_INSN_A(insn), targetLabel);
+        break;
+
+    case LOP_SELECTN:
+        formatAppend(result, "SELECTN R%d R%d base=%d count=%u default=%d\n", LUAU_INSN_A(insn), LUAU_INSN_B(insn), int32_t(code[0]), code[1], int32_t(code[2]));
+        code += 3;
         break;
 
     case LOP_JUMPXTABLE:

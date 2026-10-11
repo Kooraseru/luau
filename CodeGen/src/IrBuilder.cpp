@@ -180,7 +180,7 @@ void IrBuilder::buildFunctionIr(Proto* proto)
         const Instruction* pc = &proto->code[i];
         LuauOpcode op = LuauOpcode(LUAU_INSN_OP(*pc));
 
-        int nexti = i + getOpLength(op);
+        int nexti = i + getInstructionLength(pc);
         CODEGEN_ASSERT(nexti <= proto->sizecode);
 
         function.bcMapping[i] = {uint32_t(function.instructions.size()), ~0u};
@@ -254,7 +254,15 @@ void IrBuilder::rebuildBytecodeBasicBlocks(Proto* proto)
         if (target >= 0 && !isFastCall(op))
             jumpTargets[target] = true;
 
-        i += getOpLength(op);
+        if (op == LOP_JUMPXTABLE || op == LOP_SELECTN)
+        {
+            jumpTargets[i + getInstructionLength(pc)] = true;
+            if (op == LOP_JUMPXTABLE)
+                for (unsigned slot = 0; slot < pc[2]; ++slot)
+                    jumpTargets[i + 4 + slot + LUAU_INSN_E(pc[3 + slot])] = true;
+        }
+
+        i += getInstructionLength(pc);
         CODEGEN_ASSERT(i <= proto->sizecode);
     }
 
@@ -302,6 +310,19 @@ void IrBuilder::translateInst(LuauOpcode op, const Instruction* pc, int i)
 {
     switch (int(op))
     {
+    case LOP_JUMPIFNOTNUMBER:
+    {
+        IrOp next = blockAtInst(i + 1);
+        inst(IrCmd::JUMP_EQ_TAG, inst(IrCmd::LOAD_TAG, vmReg(LUAU_INSN_A(*pc))), constTag(LUA_TNUMBER),
+            next, blockAtInst(i + 1 + LUAU_INSN_D(*pc)));
+        if (isInternalBlock(next))
+            beginBlock(next);
+        break;
+    }
+    case LOP_JUMPXTABLE:
+    case LOP_SELECTN:
+        translateInstSwitch(*this, pc, i);
+        break;
     case LOP_NOP:
         break;
     case LOP_LOADNIL:

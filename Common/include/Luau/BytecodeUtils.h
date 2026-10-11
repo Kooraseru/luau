@@ -12,6 +12,8 @@ inline int getOpLength(LuauOpcode op)
 {
     switch (op)
     {
+    case LOP_SELECTN:
+        return 4;
     case LOP_JUMPXTABLE:
         return 3;
     case LOP_GETGLOBAL:

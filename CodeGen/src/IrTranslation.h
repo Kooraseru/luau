@@ -26,6 +26,7 @@ void translateInstLoadK(IrBuilder& build, const Instruction* pc);
 void translateInstLoadKX(IrBuilder& build, const Instruction* pc);
 void translateInstMove(IrBuilder& build, const Instruction* pc);
 void translateInstJump(IrBuilder& build, const Instruction* pc, int pcpos);
+void translateInstSwitch(IrBuilder& build, const Instruction* pc, int pcpos);
 void translateInstJumpBack(IrBuilder& build, const Instruction* pc, int pcpos);
 void translateInstJumpIf(IrBuilder& build, const Instruction* pc, int pcpos, bool not_);
 void translateInstJumpIfEq(IrBuilder& build, const Instruction* pc, int pcpos, bool not_);

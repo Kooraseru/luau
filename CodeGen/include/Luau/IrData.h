@@ -62,6 +62,10 @@ enum class IrCmd : uint8_t
     // A: Rn or Kn
     LOAD_DOUBLE,
 
+    // Load an int16 SELECTN payload from immutable native data.
+    // A: validated zero-based int index; B: bytecode instruction position.
+    LOAD_SWITCH_VALUE,
+
     // Load an int from TValue
     // A: Rn
     LOAD_INT,
@@ -416,6 +420,9 @@ enum class IrCmd : uint8_t
     // D: block (if true)
     // E: block (if false)
     JUMP_CMP_INT,
+
+    // A: validated zero-based int index; remaining operands: destination blocks.
+    JUMP_SWITCH,
 
     // Perform a conditional jump based on the result of int64 comparison
     // A, B: int64

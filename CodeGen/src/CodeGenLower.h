@@ -56,23 +56,7 @@ inline void gatherFunctionsHelper(
                                            : ((proto->flags & LPF_NATIVE_COLD) == 0 || (flags & CodeGen_ColdFunctions) != 0);
 
     if (shouldGather)
-    {
-        // The experimental switch branch opcodes are interpreter-only until IR
-        // basic-block analysis models all of its possible successors.
-        bool containsIndirectDispatch = false;
-        for (int pc = 0; pc < proto->sizecode;)
-        {
-            LuauOpcode op = LuauOpcode(LUAU_INSN_OP(proto->code[pc]));
-            if (op == LOP_JUMPXTABLE || op == LOP_JUMPIFNOTNUMBER)
-            {
-                containsIndirectDispatch = true;
-                break;
-            }
-            pc += getOpLength(op);
-        }
-        if (!containsIndirectDispatch)
-            results[proto->bytecodeid] = proto;
-    }
+        results[proto->bytecodeid] = proto;
 
     // Recursively traverse child protos even if we aren't compiling this one
     for (int i = 0; i < proto->sizep; i++)

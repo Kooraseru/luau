@@ -6,6 +6,7 @@ import base64
 import json
 import statistics
 from pathlib import Path
+from paths import ARTIFACTS, BYTECODE
 
 KINDS = ("if", "switch", "table", "function-table")
 LABELS = {"if": "if/elseif", "switch": "switch", "table": "value table", "function-table": "function table"}
@@ -30,10 +31,10 @@ def load(path):
 
 def main():
     parser = argparse.ArgumentParser(description="Write a Markdown summary for switch benchmark results")
-    parser.add_argument("results", nargs="?", default="switch-results.json")
-    parser.add_argument("--graph", default="switch-results.png")
-    parser.add_argument("--output", default="switch-results.md")
-    parser.add_argument("--bytecode-dir", default="switch-bytecode")
+    parser.add_argument("results", nargs="?", default=str(ARTIFACTS / "switch-results.json"))
+    parser.add_argument("--graph", default=str(ARTIFACTS / "switch-results.png"))
+    parser.add_argument("--output", default=str(ARTIFACTS / "switch-results.md"))
+    parser.add_argument("--bytecode-dir", default=str(BYTECODE))
     args = parser.parse_args()
 
     rows = load(args.results)

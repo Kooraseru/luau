@@ -6,9 +6,8 @@
 import json
 import subprocess
 import sys
-from pathlib import Path
+from paths import ROOT, ARTIFACTS, BYTECODE, GENERATED
 
-ROOT = Path(__file__).resolve().parents[2]
 SIZES = (4, 16, 64, 256, 1024)
 KINDS = ("if", "switch", "table", "function-table")
 EXPECTED = {(size, kind) for size in SIZES for kind in KINDS}
@@ -22,14 +21,17 @@ def run(*args):
 
 
 def main():
+    if "--suite" in sys.argv:
+        from suite import main as suite_main
+        raise SystemExit(suite_main())
     exe = ".exe" if sys.platform == "win32" else ""
     build = ROOT / "build-release"
     vm = build / f"luau{exe}"
     compiler = build / f"luau-compile{exe}"
     unit_tests = build / f"Luau.UnitTest{exe}"
-    output = ROOT / "switch-results"
-    bytecode = ROOT / "switch-bytecode"
-    bytecode.mkdir(exist_ok=True)
+    output = ARTIFACTS / "switch-results"
+    bytecode = BYTECODE
+    bytecode.mkdir(parents=True, exist_ok=True)
 
     run("cmake", "--build", build, "--target", "Luau.Repl.CLI", "Luau.UnitTest", "Luau.Compile.CLI", "-j", "4")
     run(unit_tests)
@@ -46,28 +48,28 @@ def main():
             print(f"Disassembling {kind}-{size} -> {target.name}", flush=True)
             with target.open("w", encoding="utf-8") as out:
                 subprocess.run(
-                    [str(compiler), "--text", "-O2", f"bench/switch/generated/{kind}-{size}.luau"],
+                    [str(compiler), "--text", "-O2", str(GENERATED / f"{kind}-{size}.luau")],
                     cwd=ROOT, stdout=out, check=True,
                 )
-            if kind == "switch" and size >= 64 and "JUMPXTABLE" not in target.read_text(encoding="utf-8"):
-                raise SystemExit(f"Expected optimized numeric switch bytecode in {target}")
+            if kind == "switch" and size >= 64 and "SELECTN" not in target.read_text(encoding="utf-8"):
+                raise SystemExit(f"Expected constant number selection bytecode in {target}")
 
     run(sys.executable, "bench/switch/inspect_bytecode.py")
 
     # The upstream harness can exit 0 even when individual benchmarks fail.
     # Remove old outputs so an unsuccessful run cannot reuse a stale graph.
     for extension in (".json", ".png", ".md"):
-        (ROOT / f"switch-results{extension}").unlink(missing_ok=True)
+        output.with_suffix(extension).unlink(missing_ok=True)
 
     run(
         sys.executable, "bench/bench.py",
-        "--folder", "bench/switch/generated",
+        "--folder", str(GENERATED),
         "--vm", f"{vm.as_posix()} -O2",
         "--filename", str(output),
         "--absolute",
     )
 
-    measurements = json.loads((ROOT / "switch-results.json").read_text())
+    measurements = json.loads(output.with_suffix(".json").read_text())
     observed = set()
     for group in measurements:
         if not group:
@@ -88,11 +90,11 @@ def main():
     if missing:
         print(f"Known compiler limitation: {sorted(missing)}", flush=True)
 
-    if not (ROOT / "switch-results.png").is_file():
+    if not output.with_suffix(".png").is_file():
         raise SystemExit("Benchmark graph was not generated")
-    run(sys.executable, "bench/switch/report.py", "switch-results.json")
+    run(sys.executable, "bench/switch/report.py", output.with_suffix(".json"))
 
-    report = ROOT / "switch-results.md"
+    report = output.with_suffix(".md")
     print(f"\nReport: {report}", flush=True)
     print(f"Benchmarks: {len(observed)}/{len(EXPECTED)} successful", flush=True)
     print(f"Bytecode: {bytecode}", flush=True)

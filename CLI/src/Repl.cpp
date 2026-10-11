@@ -5,6 +5,8 @@
 #include "Luau/Common.h"
 #include "lua.h"
 #include "lualib.h"
+#include "lstate.h"
+#include "lapi.h"
 
 #include "Luau/CodeGen.h"
 #include "Luau/Compiler.h"
@@ -51,6 +53,26 @@ constexpr int MaxTraversalLimit = 50;
 
 static bool codegen = false;
 static bool codegenCold = false;
+static bool nativeReport = false;
+static int (*reportedNativeEnter)(lua_State*, Proto*) = nullptr;
+static std::vector<unsigned> nativeEntries;
+
+static int countNativeEnter(lua_State* L, Proto* proto)
+{
+    if (nativeEntries.size() <= size_t(proto->bytecodeid))
+        nativeEntries.resize(proto->bytecodeid + 1);
+    ++nativeEntries[proto->bytecodeid];
+    return reportedNativeEnter(L, proto);
+}
+
+static void reportNativeProto(Proto* proto)
+{
+    fprintf(stderr, "NATIVE\t%u\t%s\t%d\t%u\n", proto->bytecodeid,
+        proto->debugname ? getstr(proto->debugname) : "<root>", proto->execdata != nullptr,
+        size_t(proto->bytecodeid) < nativeEntries.size() ? nativeEntries[proto->bytecodeid] : 0);
+    for (int i = 0; i < proto->sizep; ++i)
+        reportNativeProto(proto->p[i]);
+}
 static bool jitInliner = false;
 static int program_argc = 0;
 char** program_argv = nullptr;
@@ -620,7 +642,15 @@ static bool runFile(const char* name, lua_State* GL, bool repl)
             if (countersActive())
                 nativeOptions.recordCounters = true;
 
-            Luau::CodeGen::compile(L, -1, nativeOptions);
+            Luau::CodeGen::CompilationStats stats;
+            Luau::CodeGen::CompilationResult result = Luau::CodeGen::compile(L, -1, nativeOptions, nativeReport ? &stats : nullptr);
+            if (nativeReport)
+            {
+                fprintf(stderr, "NATIVE_COMPILE\t%s\t%u\t%u\t%u\n", Luau::CodeGen::toString(result.result).c_str(),
+                    stats.functionsTotal, stats.functionsCompiled, stats.functionsBound);
+                for (const auto& failure : result.protoFailures)
+                    fprintf(stderr, "NATIVE_FAILURE\t%s\t%s\n", failure.debugname.c_str(), Luau::CodeGen::toString(failure.result).c_str());
+            }
         }
 
         if (coverageActive())
@@ -629,8 +659,22 @@ static bool runFile(const char* name, lua_State* GL, bool repl)
         if (countersActive())
             countersTrack(L, -1);
 
+        Proto* reportedProto = nativeReport ? clvalue(luaA_toobject(L, -1))->l.p : nullptr;
+        if (nativeReport)
+        {
+            nativeEntries.clear();
+            reportedNativeEnter = L->global->ecb.enter;
+            if (reportedNativeEnter)
+                L->global->ecb.enter = countNativeEnter;
+        }
         setupArguments(L, program_argc, program_argv);
         status = lua_resume(L, NULL, program_argc);
+        if (nativeReport)
+        {
+            if (reportedNativeEnter)
+                L->global->ecb.enter = reportedNativeEnter;
+            reportNativeProto(reportedProto);
+        }
     }
     else
     {
@@ -680,6 +724,7 @@ static void displayHelp(const char* argv0)
     printf("  --profile[=N]: profile the code using N Hz sampling (default 10000) and output results to profile.out\n");
     printf("  --timetrace: record compiler time tracing information into trace.json\n");
     printf("  --codegen: execute code using native code generation\n");
+    printf("  --native-report: report compiled protos and native gate entries (diagnostic; use separately from timings)\n");
     printf("  --codegen-cold: execute code using native code generation, including any functions deemed not profitable to natively compile\n");
     printf("  --codegen-perf: execute code using native code generation and profile using perf (only on Linux)\n");
     printf("  --program-args,-a: declare start of arguments to be passed to the Luau program\n");
@@ -746,6 +791,10 @@ int replMain(int argc, char** argv)
         else if (strncmp(argv[i], "--profile=", 10) == 0)
         {
             profile = atoi(argv[i] + 10);
+        }
+        else if (strcmp(argv[i], "--native-report") == 0)
+        {
+            nativeReport = true;
         }
         else if (strcmp(argv[i], "--codegen") == 0)
         {
@@ -831,7 +880,11 @@ int replMain(int argc, char** argv)
     }
 
     if (codegen && !Luau::CodeGen::isSupported())
+    {
         fprintf(stderr, "Warning: Native code generation is not supported in current configuration\n");
+        if (nativeReport)
+            codegen = false;
+    }
 
     const std::vector<std::string> files = getSourceFiles(argc, argv);
 

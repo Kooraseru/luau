@@ -2831,6 +2831,10 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
             }
         }
         break;
+    case IrCmd::LOAD_SWITCH_VALUE:
+    case IrCmd::JUMP_SWITCH:
+        foldConstants(build, function, block, index);
+        break;
     case IrCmd::JUMP:
         break;
     case IrCmd::JUMP_EQ_POINTER:

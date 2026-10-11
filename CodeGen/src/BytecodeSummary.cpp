@@ -44,7 +44,7 @@ FunctionBytecodeSummary FunctionBytecodeSummary::fromProto(Proto* proto, unsigne
         Instruction insn = proto->code[i];
         uint8_t op = LUAU_INSN_OP(insn);
         summary.incCount(0, op);
-        i += getOpLength(LuauOpcode(op));
+        i += getInstructionLength(proto->code + i);
     }
 
     return summary;

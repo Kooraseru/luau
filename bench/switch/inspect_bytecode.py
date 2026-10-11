@@ -5,6 +5,7 @@ import argparse
 import collections
 import re
 from pathlib import Path
+from paths import ARTIFACTS, BYTECODE
 
 SIZES = (4, 16, 64, 256, 1024)
 KINDS = ("switch", "function-table", "table", "if")
@@ -35,8 +36,8 @@ def dispatch_instructions(source):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--bytecode-dir", default="switch-bytecode")
-    parser.add_argument("--output", default="switch-bytecode/comparison.md")
+    parser.add_argument("--bytecode-dir", default=str(BYTECODE))
+    parser.add_argument("--output", default=str(BYTECODE / "comparison.md"))
     args = parser.parse_args()
     folder = Path(args.bytecode_dir)
     rows = [
@@ -44,9 +45,10 @@ def main():
         "",
         "Static opcode counts from the dispatch region between value computation and checksum update; these are **not** counts of dynamically executed instructions.",
         "Function-table setup also creates one closure per case, outside the measured dispatch loop.",
+        "SELECTN's inline LOADN slots and JUMPXTABLE's inline JUMPX slots are data; a SELECTN dispatch executes one VM instruction.",
         "",
-        "| Cases | Variant | Dispatch instructions | Numeric guards | Equality tests | Ordered tests | Table reads | Calls |",
-        "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Cases | Variant | Dispatch instructions | Value selectors | Numeric guards | Equality tests | Ordered tests | Table reads | Calls |",
+        "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     regions = {}
     for size in SIZES:
@@ -63,9 +65,9 @@ def main():
             ordered = sum(counts[op] for op in ("JUMPIFLT", "JUMPIFNOTLT", "JUMPIFLE", "JUMPIFNOTLE"))
             reads = sum(counts[op] for op in ("GETTABLE", "GETTABLEKS", "GETTABLEN"))
             calls = counts["CALL"] + counts["CALLFB"]
-            rows.append(f"| {size} | {kind} | {len(dispatch)} | {counts['JUMPIFNOTNUMBER']} | {eq} | {ordered} | {reads} | {calls} |")
+            rows.append(f"| {size} | {kind} | {len(dispatch)} | {counts['SELECTN']} | {counts['JUMPIFNOTNUMBER']} | {eq} | {ordered} | {reads} | {calls} |")
 
-    rows += ["", "## Dispatch excerpts", "", "The switch tree excerpt is truncated; full disassemblies are saved alongside this report.", ""]
+    rows += ["", "## Dispatch excerpts", "", "Switch payload excerpts are truncated; full disassemblies are saved alongside this report.", ""]
     for size in (16, 64, 1024):
         for kind in ("switch", "function-table", "table"):
             insns = regions[(size, kind)]

@@ -92,6 +92,18 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         else
             CODEGEN_ASSERT(!"Unsupported instruction form");
         break;
+    case IrCmd::LOAD_SWITCH_VALUE:
+    {
+        const Instruction* pc = function.proto->code + uintOp(OP_B(inst));
+        std::vector<int16_t> values(pc[2]);
+        for (size_t i = 0; i < values.size(); ++i)
+            values[i] = int16_t(LUAU_INSN_D(pc[4 + i]));
+        ScopedRegX64 base{regs, SizeX64::qword};
+        build.lea(base.reg, build.bytes(values.data(), values.size() * sizeof(int16_t), 2));
+        inst.regX64 = regs.allocReg(SizeX64::dword, index);
+        build.movsx(inst.regX64, word[base.reg + qwordReg(regOp(OP_A(inst))) * 2]);
+        break;
+    }
     case IrCmd::LOAD_INT:
         inst.regX64 = regs.allocReg(SizeX64::dword, index);
 
@@ -1698,6 +1710,22 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
                 build.and_(byteReg(inst.regX64), byteReg(tmp1.reg));
             else
                 build.or_(byteReg(inst.regX64), byteReg(tmp1.reg));
+        }
+        break;
+    }
+    case IrCmd::JUMP_SWITCH:
+    {
+        // Fixed-width executable branch slots avoid absolute-address relocations.
+        ScopedRegX64 target{regs, SizeX64::qword};
+        Label table;
+        build.lea(target.reg, table);
+        build.lea(target.reg, qword[target.reg + qwordReg(regOp(OP_A(inst))) * 8]);
+        build.jmp(target.reg);
+        build.setLabel(table);
+        for (size_t i = 1; i < inst.ops.size(); ++i)
+        {
+            build.jmp(labelOp(inst.ops[i])); // five-byte relative jump
+            build.nop(3);
         }
         break;
     }

@@ -14439,4 +14439,109 @@ RETURN R1 1
     );
 }
 
+TEST_CASE("SwitchDispatchStrategyThresholds")
+{
+    for (int count : {16, 23, 24, 31, 32, 33})
+    {
+        for (int stride : {1, 3})
+        {
+            std::string source = "local function dispatch(value) switch value\n";
+            for (int i = 0; i < count; ++i)
+                source += "case " + std::to_string(i * stride) + " then return " + std::to_string(i) + "\n";
+            source += "else return -1 end end";
+
+            std::string optimized = compileFunction(source.c_str(), 0, 2);
+            CHECK_EQ(optimized.find("JUMPXTABLE") != std::string::npos, stride == 1 && count >= 24);
+            CHECK_EQ(optimized.find("JUMPIFNOTNUMBER") != std::string::npos, stride == 3 && count >= 32);
+            std::string unoptimized = compileFunction(source.c_str(), 0, 1);
+            CHECK(unoptimized.find("JUMPXTABLE") == std::string::npos);
+            CHECK(unoptimized.find("JUMPIFNOTNUMBER") == std::string::npos);
+        }
+    }
+}
+
+TEST_CASE("ConstantSwitchSelection")
+{
+    const std::pair<const char*, int> cases[] = {
+        {"switch 7 case 7 then return 1 case 7 then return 2 else return 3 end", 1},
+        {"switch '7' case 7 then return 1 case '7' then return 2 else return 3 end", 2},
+        {"switch nil case false then return 1 case nil then return 2 else return 3 end", 2},
+        {"switch false case true then return 1 case false then return 2 end", 2},
+        {"switch -0 case 0 then return 1 else return 2 end", 1},
+        {"switch 0 / 0 case 0 / 0 then return 1 else return 2 end", 2},
+        {"switch 'missing' case 'other' then return 1 end return 2", 2},
+        {"switch 2 case 1 then return 1 case 2 then return 2 case foo() then return 3 end", 2},
+    };
+    for (const auto& item : cases)
+    {
+        std::string expected = "LOADN R0 " + std::to_string(item.second) + "\nRETURN R0 1\n";
+        for (int level : {1, 2})
+        {
+            std::string bytecode = compileFunction(item.first, 0, level);
+            CHECK_EQ(bytecode.compare(0, expected.size(), expected), 0);
+            CHECK(bytecode.find("JUMP") == std::string::npos);
+        }
+    }
+    CHECK(compileFunction("switch 2 case foo() then return 1 case 2 then return 2 end", 0, 2).find("CALL") != std::string::npos);
+}
+
+TEST_CASE("SwitchConstantNumberSelection")
+{
+    auto source = [](int count, const char* value = nullptr, const char* otherwise = "-1", bool hasDefault = true) {
+        std::string result = "local function dispatch(key) local result = 99 switch key\n";
+        for (int i = 0; i < count; ++i)
+            result += "case " + std::to_string(i) + " then result = " + (value ? value : std::to_string((i * 17) % count)) + "\n";
+        if (hasDefault)
+            result += "else result = " + std::string(otherwise) + "\n";
+        return result + "end return result end return dispatch";
+    };
+    for (int count : {16, 24, 32, 64, 256})
+    {
+        std::string code = source(count);
+        std::string dump = compileFunction(code.c_str(), 0, 2);
+        CHECK_EQ(dump.find("SELECTN") != std::string::npos, count >= 24);
+        if (count >= 24)
+        {
+            CHECK(dump.find("JUMPXTABLE") == std::string::npos);
+            Luau::BytecodeBuilder builder;
+            Luau::CompileOptions options;
+            options.optimizationLevel = 2;
+            Luau::compileOrThrow(builder, code, options);
+            CHECK_EQ(builder.getVersion(), 16);
+            CHECK_EQ(uint8_t(builder.getBytecode()[0]), 16);
+        }
+        CHECK(compileFunction(code.c_str(), 0, 1).find("SELECTN") == std::string::npos);
+    }
+    for (const char* value : {"false", "nil", "'text'", "40000", "-0", "0/0", "1.5", "foo()"})
+        CHECK(compileFunction(source(24, value).c_str(), 0, 2).find("SELECTN") == std::string::npos);
+    CHECK(compileFunction(source(24, nullptr, "false").c_str(), 0, 2).find("SELECTN") == std::string::npos);
+    CHECK(compileFunction(source(24, nullptr, "-1", false).c_str(), 0, 2).find("SELECTN") == std::string::npos);
+    std::string duplicate = source(24);
+    duplicate.replace(duplicate.find("case 1 then"), std::string("case 1 then").size(), "case 0 then");
+    CHECK(compileFunction(duplicate.c_str(), 0, 2).find("SELECTN") == std::string::npos);
+    std::string effects = source(24);
+    effects.replace(effects.find("case 0 then"), std::string("case 0 then").size(), "case 0 then foo()");
+    CHECK(compileFunction(effects.c_str(), 0, 2).find("SELECTN") == std::string::npos);
+    std::string captured = source(24);
+    captured.replace(0, std::string("local function dispatch(key) local result = 99").size(), "local result = 99 local function dispatch(key)");
+    CHECK(compileFunction(captured.c_str(), 0, 2).find("SELECTN") == std::string::npos);
+    for (int debug : {1, 2})
+    {
+        Luau::BytecodeBuilder builder;
+        builder.setDumpFlags(Luau::BytecodeBuilder::Dump_Code);
+        Luau::CompileOptions options;
+        options.optimizationLevel = 2;
+        options.debugLevel = debug;
+        Luau::compileOrThrow(builder, source(24), options);
+        CHECK_EQ(builder.dumpFunction(0).find("SELECTN") != std::string::npos, debug == 1);
+    }
+    Luau::BytecodeBuilder covered;
+    covered.setDumpFlags(Luau::BytecodeBuilder::Dump_Code);
+    Luau::CompileOptions options;
+    options.optimizationLevel = 2;
+    options.coverageLevel = 1;
+    Luau::compileOrThrow(covered, source(24), options);
+    CHECK(covered.dumpFunction(0).find("SELECTN") == std::string::npos);
+}
+
 TEST_SUITE_END();
