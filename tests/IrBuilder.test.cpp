@@ -9114,6 +9114,11 @@ TEST_CASE("SwitchNativeLowering")
         std::string bytecode = Luau::compile(source, options);
         for (auto target : {Luau::CodeGen::AssemblyOptions::Target::X64_Windows, Luau::CodeGen::AssemblyOptions::Target::A64})
         {
+            // Offline A64 lowering embeds host VM offsets and requires a 64-bit pointer layout.
+            // Win32 still exercises every variant through the X64 diagnostic and interpreter checks.
+            if (target == Luau::CodeGen::AssemblyOptions::Target::A64 && sizeof(void*) != 8)
+                continue;
+
             std::unique_ptr<lua_State, void (*)(lua_State*)> state(luaL_newstate(), lua_close);
             lua_State* L = state.get();
             REQUIRE(L != nullptr);
