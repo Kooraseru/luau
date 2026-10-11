@@ -19,6 +19,11 @@ The configure command is required once, and again if the build directory is
 removed. Put the LLVM-MinGW `bin` directory on PATH first. The runner builds
 the configured targets; it does not choose or configure a compiler toolchain.
 
+For the full unit and conformance suites with LLVM-MinGW on this host, add
+`"-DCMAKE_EXE_LINKER_FLAGS=-Wl,--stack,8388608"` when configuring. Their
+recursive tests exhausted the default executable stack during migration
+validation; the larger reserve is a local toolchain setting.
+
 That executable runs through Windows x64 emulation. Compare interpreter/native
 modes within it; do not combine its numbers with ARM64 interpreter results.
 `--suite smoke` uses one count per shape and cycling/miss inputs; `--native off`
@@ -343,3 +348,38 @@ All generated sources, reports, disassembly, and the optimization checklist live
 under `build/switch/`, covered by Luau's original `/build/` ignore rule. Maintained
 runners and handwritten regression sources remain in `bench/switch/`. No
 switch-specific ignore rules are needed. Existing build directories are unchanged.
+
+## Upstream migration and RFC endpoint
+
+The local migration targets Luau 0.742 and the following Windows IR assertion
+fix (`upstream/master` at `8387cfb4`). `origin/master` was already an ancestor
+of the switch branch; these newer changes come from `luau-lang/luau`.
+
+Conflict resolutions preserve the upstream constructor opcodes before the
+fork-specific switch opcodes, extend the interpreter dispatch list in that
+same order, retain both serializer cases and compiler includes, and use the
+upstream builder cleanup routine (which also clears switch jump fixups).
+Regenerate fork bytecode after migrating; the experimental opcode numbers
+are not a stable interchange format.
+
+The SELECTN handler uses ordinary `StkId` declarations for its subject and
+result. `VM_CASE_STKID` becomes empty in Debug builds and only works with the
+interpreter's shared `ra`, `rb`, and `rc` variables. This fixes the compilation
+failure seen in the Windows, sanitizer, and extra-configuration CI jobs.
+The build workflow now accepts switch-branch pushes and manual dispatch, and
+runs the handwritten switch semantic regressions at O1 and O2 on Unix and
+Windows. Expected golden `.output` files remain tracked; `.output.tmp` captures
+remain ignored.
+
+The RFC and history squash endpoint requires:
+
+- A resolved migration with execution checks and a green hosted CI matrix.
+- Paired confirmation of performance candidates on the migrated compiler.
+- A documented strategy decision for each supported switch structure, including
+  measured costs and cases where indexed dispatch loses.
+- A file-by-file rationale for parser/analysis, compiler, bytecode consumers,
+  interpreter, native CodeGen, tests, and benchmark tooling, plus an explicit
+  fork bytecode compatibility plan.
+
+History compression follows that reviewable endpoint. Migration alone does
+not establish a performance result or authorize publishing an RFC.
