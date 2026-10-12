@@ -1,3 +1,20 @@
+## GitHub Actions artifacts
+
+Run the **benchmark** workflow from Actions (or GitHub Local Actions). It runs
+O2 switch/interpreter/native comparisons on each Unix OS/compiler matrix entry
+and Windows x64/MSVC. Each hosted configuration uploads a separate artifact
+containing results.csv, results.json, summary.md and environment.txt for 30 days.
+Native availability and actual entry are recorded; unsupported native execution
+is skipped, not labeled a native pass. Raw samples and equivalent baselines are
+included in the result JSON. Compare within one architecture/toolchain first.
+Callgrind Ubuntu results are separate artifacts: their scaled instruction counts
+are not elapsed times. Results are no longer committed to an external repository.
+Uploads are attempted after failures to retain available partial files. Hard
+cancellation may interrupt uploads. Local Docker runs preserve these files under
+build/benchmark/<run-id>/<job>/; they do not upload to GitHub. Windows and macOS
+jobs need their respective hosts and are explicitly skipped by the Linux helper.
+Only measurement files are uploaded, not binaries or generated source/disassembly.
+
 # Switch dispatch experiment
 
 ## O2 interpreter/native matrix

@@ -1,6 +1,7 @@
 name: benchmark
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - master
@@ -15,18 +16,16 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-22.04]
-        benchResultsRepo:
-          - { name: "luau-lang/benchmark-data", branch: "main" }
 
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout Luau repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install valgrind
         run: |
           sudo apt-get update
-          sudo apt-get install valgrind
+          sudo apt-get install -y valgrind python3-requests
 
       - name: Build Luau (gcc)
         run: |
@@ -46,15 +45,15 @@ jobs:
 
       - name: Run benchmark (bench-gcc)
         run: |
-          python bench/bench.py --callgrind --vm "./luau-gcc -O2" | tee -a bench-gcc-output.txt
+          python -u bench/bench.py --callgrind --vm "./luau-gcc -O2" --filename bench-gcc --show-commands | tee -a bench-gcc-output.txt
 
       - name: Run benchmark (bench)
         run: |
-          python bench/bench.py --callgrind --vm "./luau -O2" | tee -a bench-output.txt
+          python -u bench/bench.py --callgrind --vm "./luau -O2" --filename bench-clang --show-commands | tee -a bench-output.txt
 
       - name: Run benchmark (bench-codegen)
         run: |
-          python bench/bench.py --callgrind --vm "./luau-codegen --codegen -O2" | tee -a bench-codegen-output.txt
+          python -u bench/bench.py --callgrind --vm "./luau-codegen --codegen -O2" --filename bench-codegen --show-commands | tee -a bench-codegen-output.txt
 
       - name: Run benchmark (analyze)
         run: |
@@ -84,62 +83,118 @@ jobs:
           valgrind --tool=callgrind ./luau-compile --codegennull -O2 bench/other/regex.lua 2>&1 | filter regex-O2-codegen | tee -a compile-output.txt
           valgrind --tool=callgrind ./luau-compile --codegennull -O2 -t1 bench/other/regex.lua 2>&1 | filter regex-O2-t1-codegen | tee -a compile-output.txt
 
-      - name: Checkout benchmark results
-        uses: actions/checkout@v3
-        with:
-          repository: ${{ matrix.benchResultsRepo.name }}
-          ref: ${{ matrix.benchResultsRepo.branch }}
-          token: ${{ secrets.BENCH_GITHUB_TOKEN }}
-          path: "./gh-pages"
 
-      - name: Store results (bench)
-        uses: Roblox/rhysd-github-action-benchmark@v-luau
+      - name: Upload Callgrind results (gcc)
+        if: ${{ always() && !env.ACT }}
+        uses: actions/upload-artifact@v4
         with:
-          name: callgrind clang
-          tool: "benchmarkluau"
-          output-file-path: ./bench-output.txt
-          external-data-json-path: ./gh-pages/bench.json
+          name: callgrind-${{ matrix.os }}-${{ runner.arch }}-gcc
+          retention-days: 30
+          path: |
+            bench-gcc-output.txt
+            bench-gcc.json
 
-      - name: Store results (bench-codegen)
-        uses: Roblox/rhysd-github-action-benchmark@v-luau
+      - name: Upload Callgrind results (clang)
+        if: ${{ always() && !env.ACT }}
+        uses: actions/upload-artifact@v4
         with:
-          name: callgrind codegen
-          tool: "benchmarkluau"
-          output-file-path: ./bench-codegen-output.txt
-          external-data-json-path: ./gh-pages/bench-codegen.json
+          name: callgrind-${{ matrix.os }}-${{ runner.arch }}-clang
+          retention-days: 30
+          path: |
+            bench-output.txt
+            bench-clang.json
+            analyze-output.txt
+            compile-output.txt
 
-      - name: Store results (bench-gcc)
-        uses: Roblox/rhysd-github-action-benchmark@v-luau
+      - name: Upload Callgrind results (clang-native)
+        if: ${{ always() && !env.ACT }}
+        uses: actions/upload-artifact@v4
         with:
-          name: callgrind gcc
-          tool: "benchmarkluau"
-          output-file-path: ./bench-gcc-output.txt
-          external-data-json-path: ./gh-pages/bench-gcc.json
+          name: callgrind-${{ matrix.os }}-${{ runner.arch }}-clang-native
+          retention-days: 30
+          path: |
+            bench-codegen-output.txt
+            bench-codegen.json
 
-      - name: Store results (analyze)
-        uses: Roblox/rhysd-github-action-benchmark@v-luau
-        with:
-          name: luau-analyze
-          tool: "benchmarkluau"
-          output-file-path: ./analyze-output.txt
-          external-data-json-path: ./gh-pages/analyze.json
-
-      - name: Store results (compile)
-        uses: Roblox/rhysd-github-action-benchmark@v-luau
-        with:
-          name: luau-compile
-          tool: "benchmarkluau"
-          output-file-path: ./compile-output.txt
-          external-data-json-path: ./gh-pages/compile.json
-
-      - name: Push benchmark results
-        if: github.event_name == 'push'
+  switch-unix:
+    name: switch ${{ matrix.os.name }} / ${{ matrix.compiler.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - {name: ubuntu, version: ubuntu-22.04}
+          - {name: macos, version: macos-latest}
+          - {name: macos-arm, version: macos-14}
+        compiler:
+          - {name: clang, cc: clang, cxx: clang++}
+          - {name: gcc, cc: gcc, cxx: g++}
+    runs-on: ${{ matrix.os.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select compiler
+        shell: bash
         run: |
-          echo "Pushing benchmark results..."
-          cd gh-pages
-          git config user.name github-actions
-          git config user.email github@users.noreply.github.com
-          git add *.json
-          git commit -m "Add benchmarks results for ${{ github.sha }}"
-          git push
-          cd ..
+          cc='${{ matrix.compiler.cc }}'
+          cxx='${{ matrix.compiler.cxx }}'
+          if [[ "$RUNNER_OS" == macOS && '${{ matrix.compiler.name }}' == gcc ]]; then
+            brew list gcc >/dev/null 2>&1 || brew install gcc
+            prefix="$(brew --prefix gcc)/bin"
+            cxx="$(find "$prefix" -name 'g++-[0-9]*' | sort | tail -1)"
+            cc="${cxx/g++-/gcc-}"
+          fi
+          echo "CC=$cc" >> "$GITHUB_ENV"
+          echo "CXX=$cxx" >> "$GITHUB_ENV"
+      - name: Configure and build
+        shell: bash
+        run: |
+          cmake -S . -B build-benchmark -DCMAKE_BUILD_TYPE=Release -DLUAU_BUILD_TESTS=OFF
+          cmake --build build-benchmark --target Luau.Repl.CLI Luau.Compile.CLI -j 2
+      - name: Record environment
+        shell: bash
+        run: |
+          mkdir -p build/switch/bytecode
+          { git rev-parse HEAD; uname -a; "$CXX" --version; cmake --version; } > build/switch/bytecode/environment.txt
+      - name: Compare switch implementations
+        run: python3 -u bench/switch/run.py --suite full --opt O2 --native both --build-dir build-benchmark --skip-build
+      - name: Upload switch results
+        if: ${{ always() && !env.ACT }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: switch-${{ matrix.os.name }}-${{ runner.arch }}-${{ matrix.compiler.name }}-O2
+          retention-days: 30
+          path: |
+            build/switch/bytecode/**/results.json
+            build/switch/bytecode/**/results.csv
+            build/switch/bytecode/**/summary.md
+            build/switch/bytecode/environment.txt
+
+  switch-windows:
+    name: switch Windows / MSVC
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure and build
+        shell: pwsh
+        run: |
+          cmake -S . -B build-benchmark -A x64 -DLUAU_BUILD_TESTS=OFF "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE=$pwd/build-benchmark"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build build-benchmark --config Release --target Luau.Repl.CLI Luau.Compile.CLI -j 2
+      - name: Record environment
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build/switch/bytecode | Out-Null
+          @("$(git rev-parse HEAD)", "Windows $([Environment]::OSVersion)", "$(cmake --version)") | Set-Content build/switch/bytecode/environment.txt
+          Get-Content build-benchmark/CMakeFiles/*/CMakeCXXCompiler.cmake | Add-Content build/switch/bytecode/environment.txt
+      - name: Compare switch implementations
+        run: python -u bench/switch/run.py --suite full --opt O2 --native both --build-dir build-benchmark --skip-build
+      - name: Upload switch results
+        if: ${{ always() && !env.ACT }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: switch-Windows-${{ runner.arch }}-MSVC-O2
+          retention-days: 30
+          path: |
+            build/switch/bytecode/**/results.json
+            build/switch/bytecode/**/results.csv
+            build/switch/bytecode/**/summary.md
+            build/switch/bytecode/environment.txt
