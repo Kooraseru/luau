@@ -16,6 +16,8 @@ struct IrBuilder;
 enum class HostMetamethod;
 
 int getOpLength(LuauOpcode op);
+// Includes inline switch data, which is never executable bytecode.
+int getInstructionLength(const uint32_t* pc);
 bool isJumpD(LuauOpcode op);
 bool isSkipC(LuauOpcode op);
 bool isFastCall(LuauOpcode op);
@@ -31,6 +33,7 @@ inline bool isBlockTerminator(IrCmd cmd)
     case IrCmd::JUMP_IF_TRUTHY:
     case IrCmd::JUMP_IF_FALSY:
     case IrCmd::JUMP_EQ_TAG:
+    case IrCmd::JUMP_SWITCH:
     case IrCmd::JUMP_CMP_INT:
     case IrCmd::JUMP_CMP_INT64:
     case IrCmd::JUMP_EQ_POINTER:

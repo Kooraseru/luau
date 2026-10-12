@@ -751,6 +751,35 @@ public:
     bool hasEnd = false;
 };
 
+struct AstStatSwitchCase
+{
+    AstExpr* value;
+    AstStatBlock* body;
+    Location location;
+    std::optional<Location> thenLocation;
+};
+
+class AstStatSwitch : public AstStat
+{
+public:
+    LUAU_RTTI(AstStatSwitch)
+
+    AstStatSwitch(
+        const Location& location,
+        AstExpr* subject,
+        AstArray<AstStatSwitchCase> cases,
+        AstStatBlock* elsebody,
+        const std::optional<Location>& elseLocation
+    );
+
+    void visit(AstVisitor* visitor) override;
+
+    AstExpr* subject;
+    AstArray<AstStatSwitchCase> cases;
+    AstStatBlock* elsebody;
+    std::optional<Location> elseLocation;
+};
+
 class AstStatIf : public AstStat
 {
 public:
@@ -1600,6 +1629,10 @@ public:
     }
 
     virtual bool visit(class AstStatBlock* node)
+    {
+        return visit(static_cast<AstStat*>(node));
+    }
+    virtual bool visit(class AstStatSwitch* node)
     {
         return visit(static_cast<AstStat*>(node));
     }

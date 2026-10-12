@@ -20,6 +20,9 @@
 #include <algorithm>
 #include <array>
 #include <bitset>
+#include <cmath>
+#include <functional>
+
 #include <limits>
 
 #include <math.h>
@@ -3802,6 +3805,393 @@ struct Compiler
         }
     }
 
+    struct NumberSwitchCase
+    {
+        double value;
+        size_t index;
+        int32_t constant;
+    };
+
+    // Experimental direct-index dispatch over inline branch slots.
+    // Only strictly integral, distinct labels with reasonable density qualify.
+    bool compileStatSwitchJumpTable(AstStatSwitch* stat, uint8_t subjectReg)
+    {
+        if (options.optimizationLevel < 2 || stat->cases.size < 24)
+            return false;
+
+        int32_t minimum = INT32_MAX;
+        int32_t maximum = INT32_MIN;
+        std::vector<int32_t> values;
+        values.reserve(stat->cases.size);
+
+        for (const AstStatSwitchCase& switchCase : stat->cases)
+        {
+            Constant constant = getConstant(switchCase.value);
+            if (constant.type != Constant::Type_Number || !std::isfinite(constant.valueNumber) ||
+                constant.valueNumber < double(INT32_MIN) || constant.valueNumber > double(INT32_MAX) ||
+                std::floor(constant.valueNumber) != constant.valueNumber)
+                return false;
+
+            int32_t value = int32_t(constant.valueNumber);
+            minimum = std::min(minimum, value);
+            maximum = std::max(maximum, value);
+            values.push_back(value);
+        }
+
+        int64_t span = int64_t(maximum) - int64_t(minimum) + 1;
+        if (span > 4096 || span > int64_t(stat->cases.size) * 2)
+            return false;
+
+        std::vector<size_t> slotByIndex(size_t(span), ~size_t(0));
+        for (size_t i = 0; i < values.size(); ++i)
+        {
+            size_t index = size_t(int64_t(values[i]) - minimum);
+            if (slotByIndex[index] != ~size_t(0))
+                return false;
+            slotByIndex[index] = i;
+        }
+
+        bytecode.emitABC(LOP_JUMPXTABLE, subjectReg, 0, 0);
+        bytecode.emitAux(uint32_t(minimum));
+        bytecode.emitAux(uint32_t(span));
+
+        // Dense array of one-word JUMPX slots. The VM reads the selected
+        // slot's displacement directly and transfers control to its target.
+        std::vector<size_t> slotPositions(static_cast<size_t>(span));
+        for (size_t i = 0; i < size_t(span); ++i)
+        {
+            slotPositions[i] = bytecode.emitLabel();
+            bytecode.emitE(LOP_JUMPX, 0);
+        }
+
+        size_t defaultJump = bytecode.emitLabel();
+        bytecode.emitAD(LOP_JUMP, 0, 0);
+
+        std::vector<size_t> endJumps;
+        for (size_t i = 0; i < stat->cases.size; ++i)
+        {
+            size_t bodyLabel = bytecode.emitLabel();
+            size_t index = size_t(int64_t(values[i]) - minimum);
+            if (!bytecode.patchTableJump(slotPositions[index], bodyLabel))
+                CompileError::raise(stat->location, "Jump table branch exceeds 24-bit limit");
+
+            AstStatBlock* body = stat->cases.data[i].body;
+            compileStat(body);
+            if (!alwaysTerminates(body))
+            {
+                size_t jump = bytecode.emitLabel();
+                bytecode.emitAD(LOP_JUMP, 0, 0);
+                endJumps.push_back(jump);
+            }
+        }
+
+        size_t elseLabel = bytecode.emitLabel();
+        patchJump(stat, defaultJump, elseLabel);
+        for (size_t k = 0; k < slotByIndex.size(); ++k)
+            if (slotByIndex[k] == ~size_t(0))
+                if (!bytecode.patchTableJump(slotPositions[k], elseLabel))
+                    CompileError::raise(stat->location, "Jump table branch exceeds 24-bit limit");
+
+        if (stat->elsebody)
+            compileStat(stat->elsebody);
+
+        size_t endLabel = bytecode.emitLabel();
+        patchJumps(stat, endJumps, endLabel);
+        return true;
+    }
+
+    // Optimize switches whose labels are exclusively distinct numeric constants.
+    // The numeric VM guard is essential: ordinary < comparisons would otherwise
+    // throw or invoke metamethods for nonnumber switch subjects.
+    bool compileStatSwitchNumberTree(AstStatSwitch* stat, uint8_t subjectReg)
+    {
+        if (options.optimizationLevel < 2 || stat->cases.size < 32)
+            return false;
+
+        std::vector<NumberSwitchCase> cases;
+        cases.reserve(stat->cases.size);
+
+        for (size_t i = 0; i < stat->cases.size; ++i)
+        {
+            Constant constant = getConstant(stat->cases.data[i].value);
+            if (constant.type != Constant::Type_Number || !std::isfinite(constant.valueNumber))
+                return false;
+
+            cases.push_back({constant.valueNumber, i, -1});
+        }
+
+        std::sort(cases.begin(), cases.end(), [](const NumberSwitchCase& a, const NumberSwitchCase& b) {
+            return a.value < b.value;
+        });
+
+        for (size_t i = 1; i < cases.size(); ++i)
+            if (cases[i - 1].value == cases[i].value)
+                return false; // first-match duplicate cases require the linear path
+
+        for (NumberSwitchCase& item : cases)
+            item.constant = getConstantIndex(stat->cases.data[item.index].value);
+
+        RegScope rs(this);
+        uint8_t pivotReg = allocReg(stat, 1u);
+
+        size_t nonNumber = bytecode.emitLabel();
+        bytecode.emitAD(LOP_JUMPIFNOTNUMBER, subjectReg, 0);
+
+        std::vector<size_t> matchJumps(stat->cases.size);
+        std::vector<size_t> missJumps;
+
+        std::function<void(size_t, size_t)> emitTree = [&](size_t begin, size_t end) {
+            if (end - begin <= 16)
+            {
+                // Small leaves use equality directly instead of another ordering test and pivot load.
+                for (size_t i = begin; i < end; ++i)
+                {
+                    matchJumps[cases[i].index] = bytecode.emitLabel();
+                    bytecode.emitAD(LOP_JUMPXEQKN, subjectReg, 0);
+                    bytecode.emitAux(uint32_t(cases[i].constant));
+                }
+
+                size_t miss = bytecode.emitLabel();
+                bytecode.emitAD(LOP_JUMP, 0, 0);
+                missJumps.push_back(miss);
+                return;
+            }
+
+            size_t mid = begin + (end - begin) / 2;
+            const NumberSwitchCase& pivot = cases[mid];
+
+            // Preserve early matches at pivots before partitioning the remaining labels.
+            matchJumps[pivot.index] = bytecode.emitLabel();
+            bytecode.emitAD(LOP_JUMPXEQKN, subjectReg, 0);
+            bytecode.emitAux(uint32_t(pivot.constant));
+
+            emitLoadK(pivotReg, pivot.constant);
+            size_t rightJump = bytecode.emitLabel();
+            bytecode.emitAD(LOP_JUMPIFNOTLT, subjectReg, 0);
+            bytecode.emitAux(pivotReg);
+
+            emitTree(begin, mid);
+
+            size_t rightLabel = bytecode.emitLabel();
+            patchJump(stat, rightJump, rightLabel);
+            emitTree(mid + 1, end);
+        };
+
+        emitTree(0, cases.size());
+
+        std::vector<size_t> endJumps;
+        for (size_t i = 0; i < stat->cases.size; ++i)
+        {
+            size_t caseLabel = bytecode.emitLabel();
+            patchJump(stat, matchJumps[i], caseLabel);
+
+            AstStatBlock* body = stat->cases.data[i].body;
+            compileStat(body);
+
+            if (!alwaysTerminates(body))
+            {
+                size_t endJump = bytecode.emitLabel();
+                bytecode.emitAD(LOP_JUMP, 0, 0);
+                endJumps.push_back(endJump);
+            }
+        }
+
+        size_t elseLabel = bytecode.emitLabel();
+        patchJump(stat, nonNumber, elseLabel);
+        patchJumps(stat, missJumps, elseLabel);
+
+        if (stat->elsebody)
+            compileStat(stat->elsebody);
+
+        size_t endLabel = bytecode.emitLabel();
+        patchJumps(stat, endJumps, endLabel);
+        return true;
+    }
+
+    bool compileStatSwitchSelectNumber(AstStatSwitch* stat, uint8_t subjectReg)
+    {
+        if (options.optimizationLevel < 2 || options.debugLevel > 1 || options.coverageLevel || stat->cases.size < 24 ||
+            stat->cases.size > 4096 || !stat->elsebody)
+            return false;
+
+        AstLocal* destination = nullptr;
+        auto valueOf = [&](AstStatBlock* body, int16_t& result) {
+            if (body->body.size != 1)
+                return false;
+            AstStatAssign* assign = body->body.data[0]->as<AstStatAssign>();
+            if (!assign || assign->vars.size != 1 || assign->values.size != 1)
+                return false;
+            AstExprLocal* local = assign->vars.data[0]->as<AstExprLocal>();
+            if (!local || getLocalReg(local->local) < 0 || (destination && destination != local->local))
+                return false;
+            Constant value = getConstant(assign->values.data[0]);
+            if (value.type != Constant::Type_Number || !std::isfinite(value.valueNumber) || value.valueNumber < INT16_MIN ||
+                value.valueNumber > INT16_MAX || std::floor(value.valueNumber) != value.valueNumber ||
+                (value.valueNumber == 0 && std::signbit(value.valueNumber)))
+                return false;
+            destination = local->local;
+            result = int16_t(value.valueNumber);
+            return true;
+        };
+        int16_t otherwise;
+        if (!valueOf(stat->elsebody, otherwise))
+            return false;
+
+        std::vector<int32_t> keys;
+        std::vector<int16_t> values;
+        keys.reserve(stat->cases.size);
+        values.reserve(stat->cases.size);
+        int32_t minimum = INT32_MAX;
+        int32_t maximum = INT32_MIN;
+        for (const AstStatSwitchCase& item : stat->cases)
+        {
+            Constant key = getConstant(item.value);
+            int16_t value;
+            if (key.type != Constant::Type_Number || !std::isfinite(key.valueNumber) || key.valueNumber < double(INT32_MIN) ||
+                key.valueNumber > double(INT32_MAX) || std::floor(key.valueNumber) != key.valueNumber || !valueOf(item.body, value))
+                return false;
+            int32_t k = int32_t(key.valueNumber);
+            minimum = std::min(minimum, k);
+            maximum = std::max(maximum, k);
+            keys.push_back(k);
+            values.push_back(value);
+        }
+        int64_t span = int64_t(maximum) - minimum + 1;
+        if (span > 4096 || span > int64_t(keys.size()) * 2)
+            return false;
+
+        std::vector<int16_t> slots(size_t(span), otherwise);
+        std::vector<bool> occupied(size_t(span), false);
+        for (size_t i = 0; i < keys.size(); ++i)
+        {
+            size_t index = size_t(int64_t(keys[i]) - minimum);
+            if (occupied[index])
+                return false;
+            occupied[index] = true;
+            slots[index] = values[i];
+        }
+
+        uint8_t resultReg = uint8_t(getLocalReg(destination));
+        bytecode.emitABC(LOP_SELECTN, resultReg, subjectReg, 0);
+        bytecode.emitAux(uint32_t(minimum));
+        bytecode.emitAux(uint32_t(span));
+        bytecode.emitAux(uint32_t(int32_t(otherwise)));
+        for (int16_t value : slots)
+            bytecode.emitAD(LOP_LOADN, resultReg, value);
+        return true;
+    }
+
+    void compileStatSwitch(AstStatSwitch* stat)
+    {
+        RegScope rs(this);
+
+        // Table construction and other nonprimitive expressions may still have observable effects.
+        auto isPrimitive = [](Constant::Type type) {
+            return type == Constant::Type_Nil || type == Constant::Type_Boolean || type == Constant::Type_Number ||
+                   type == Constant::Type_String;
+        };
+
+        Constant subject = getConstant(stat->subject);
+        if (options.optimizationLevel >= 1 && isPrimitive(subject.type))
+        {
+            bool complete = true;
+            for (const AstStatSwitchCase& item : stat->cases)
+            {
+                Constant label = getConstant(item.value);
+                if (!isPrimitive(label.type))
+                {
+                    complete = false;
+                    break;
+                }
+                if (constantsEqual(subject, label))
+                {
+                    compileStat(item.body);
+                    return;
+                }
+            }
+            if (complete)
+            {
+                if (stat->elsebody)
+                    compileStat(stat->elsebody);
+                return;
+            }
+        }
+
+        uint8_t subjectReg = compileExprAuto(stat->subject, rs);
+        if (compileStatSwitchSelectNumber(stat, subjectReg))
+            return;
+        if (compileStatSwitchJumpTable(stat, subjectReg))
+            return;
+        if (compileStatSwitchNumberTree(stat, subjectReg))
+            return;
+
+        std::vector<size_t> endJumps;
+
+        for (const AstStatSwitchCase& switchCase : stat->cases)
+        {
+            size_t nextCase;
+            Constant constant = getConstant(switchCase.value);
+            LuauOpcode constantJump = LOP_NOP;
+            int32_t cid = -1;
+
+            switch (constant.type)
+            {
+            case Constant::Type_Nil:
+                constantJump = LOP_JUMPXEQKNIL;
+                cid = 0;
+                break;
+            case Constant::Type_Boolean:
+                constantJump = LOP_JUMPXEQKB;
+                cid = constant.valueBoolean;
+                break;
+            case Constant::Type_Number:
+                constantJump = LOP_JUMPXEQKN;
+                cid = getConstantIndex(switchCase.value);
+                break;
+            case Constant::Type_String:
+                constantJump = LOP_JUMPXEQKS;
+                cid = getConstantIndex(switchCase.value);
+                break;
+            default:
+                break;
+            }
+
+            if (constantJump != LOP_NOP && cid >= 0)
+            {
+                // Jump to the next case when the subject does not equal this constant.
+                nextCase = bytecode.emitLabel();
+                bytecode.emitAD(constantJump, subjectReg, 0);
+                bytecode.emitAux(uint32_t(cid) | 0x80000000u);
+            }
+            else
+            {
+                RegScope caseRs(this);
+                uint8_t caseReg = compileExprAuto(switchCase.value, caseRs);
+                nextCase = bytecode.emitLabel();
+                bytecode.emitAD(LOP_JUMPIFNOTEQ, subjectReg, 0);
+                bytecode.emitAux(caseReg);
+            }
+
+            compileStat(switchCase.body);
+
+            if (!alwaysTerminates(switchCase.body))
+            {
+                size_t endJump = bytecode.emitLabel();
+                bytecode.emitAD(LOP_JUMP, 0, 0);
+                endJumps.push_back(endJump);
+            }
+
+            size_t nextLabel = bytecode.emitLabel();
+            patchJump(stat, nextCase, nextLabel);
+        }
+
+        if (stat->elsebody)
+            compileStat(stat->elsebody);
+
+        size_t endLabel = bytecode.emitLabel();
+        patchJumps(stat, endJumps, endLabel);
+    }
+
     void compileStatIf(AstStatIf* stat)
     {
         // Optimization: condition is always false => we only need the else body
@@ -4891,6 +5281,10 @@ struct Compiler
             }
 
             popLocals(oldLocals);
+        }
+        else if (AstStatSwitch* stat = node->as<AstStatSwitch>())
+        {
+            compileStatSwitch(stat);
         }
         else if (AstStatIf* stat = node->as<AstStatIf>())
         {

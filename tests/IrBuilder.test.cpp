@@ -7,12 +7,18 @@
 #include "Luau/OptimizeDeadStore.h"
 #include "Luau/OptimizeFinalX64.h"
 #include "ScopedFlags.h"
+#include "Luau/CodeGen.h"
+#include "Luau/Compiler.h"
+#include "lualib.h"
+#include "lobject.h"
+#include <memory>
 
 #include "doctest.h"
 
 #include <limits.h>
 
 LUAU_FASTFLAG(DebugLuauAbortingChecks)
+LUAU_FASTFLAG(DebugLuauNoInline)
 LUAU_FASTFLAG(LuauCodegenInteger3)
 LUAU_FASTFLAG(LuauIntegerType2)
 LUAU_FASTFLAG(LuauIntegerLibrary)
@@ -9075,3 +9081,88 @@ bb_0:
 }
 
 TEST_SUITE_END();
+
+TEST_CASE("SwitchNativeLowering")
+{
+    ScopedFastFlag noinline(FFlag::DebugLuauNoInline, true);
+    // Both offline backends must lower switch data without treating slots as code.
+    // Supported hosts additionally execute the compiled function against an oracle.
+    for (int variant = 0; variant < 10; ++variant)
+    {
+        int stride = variant == 2 ? 17 : (variant == 3 || variant == 9 ? 2 : 1);
+        bool select = variant == 0 || variant == 3 || variant == 4 || variant == 6 || variant == 8;
+        int base = variant >= 8 ? -32 : variant >= 6 ? 2147483584 : (variant >= 4 ? -2147483647 - 1 : -32);
+        std::string source = "local function helper(x) return x end\n@native\n@debugnoinline\nlocal function dispatch(x)\n";
+        if (select)
+            source += "local result = x\n";
+        source += "switch x\n";
+        std::string destination = variant == 3 || variant == 8 ? "x" : "result";
+        for (int i = 0; i < 64; ++i)
+            source += "case " + std::to_string(i * stride + base) + " then " +
+                      (select ? destination + " = " : "return ") + std::to_string(i * 137 - 16000) + (variant == 8 ? " + x" : "") + "\n";
+        source += select ? "else " + destination + " = -19001 end\nreturn " + destination + "\nend\n" : "else return -19001 end\nend\n";
+        source += "for i = 0, 63 do assert(dispatch(i * " + std::to_string(stride) + " + (" + std::to_string(base) + ")) == i * 137 - 16000" +
+                  (variant == 8 ? " + i - 32" : "") + ") end\n";
+        source += "for _, x in {false, true, '1', {}, 0.5, 1e-300, -1e-300, 1e30, -1e30, 0/0, math.huge, -math.huge} do assert(dispatch(x) == -19001) end\n";
+        source += "assert(dispatch(nil) == -19001)\n";
+        if (stride == 2)
+            source += "assert(dispatch(-31) == -19001)\n";
+
+        Luau::CompileOptions options;
+        options.optimizationLevel = 2;
+        options.debugLevel = 1;
+        std::string bytecode = Luau::compile(source, options);
+        for (auto target : {Luau::CodeGen::AssemblyOptions::Target::X64_Windows, Luau::CodeGen::AssemblyOptions::Target::A64})
+        {
+            // Offline A64 lowering embeds host VM offsets and requires a 64-bit pointer layout.
+            // Win32 still exercises every variant through the X64 diagnostic and interpreter checks.
+            if (target == Luau::CodeGen::AssemblyOptions::Target::A64 && sizeof(void*) != 8)
+                continue;
+
+            std::unique_ptr<lua_State, void (*)(lua_State*)> state(luaL_newstate(), lua_close);
+            lua_State* L = state.get();
+            REQUIRE(L != nullptr);
+            luaL_openlibs(L);
+            REQUIRE(luau_load(L, "switch", bytecode.data(), bytecode.size(), 0) == 0);
+            Luau::CodeGen::AssemblyOptions assembly;
+            assembly.target = target;
+            assembly.includeAssembly = true;
+            assembly.includeIr = true;
+            Luau::CodeGen::LoweringStats stats;
+            std::string text = Luau::CodeGen::getAssembly(L, -1, assembly, &stats);
+            CHECK(stats.totalFunctions == 1);
+            CHECK(stats.skippedFunctions == 0);
+            CHECK(stats.regAllocErrors == 0);
+            CHECK(stats.loweringErrors == 0);
+            CHECK((text.find("LOAD_SWITCH_VALUE") != std::string::npos || text.find("JUMP_CMP_NUM") != std::string::npos || text.find("JUMP_SWITCH") != std::string::npos));
+            if (Luau::CodeGen::isSupported())
+            {
+                Luau::CodeGen::create(L);
+                Luau::CodeGen::CompilationStats compiled;
+                auto result = Luau::CodeGen::compile(L, -1, 0, &compiled);
+                REQUIRE(!result.hasErrors());
+                CHECK(compiled.functionsBound == 1);
+            }
+            REQUIRE(lua_pcall(L, 0, 0, 0) == 0);
+        }
+    }
+}
+
+TEST_CASE_FIXTURE(IrBuilderFixture, "NativeSwitchConstantIndex")
+{
+    Instruction code[] = {LOP_SELECTN, 0, 1, 0, uint32_t(uint16_t(-1234)) << 16 | LOP_LOADN};
+    Proto proto{};
+    proto.code = code;
+    build.function.proto = &proto;
+    IrOp stored, jump;
+    withTwoBlocks([&](IrOp a, IrOp b) {
+        IrOp selected = build.inst(IrCmd::LOAD_SWITCH_VALUE, build.constInt(0), build.constUint(0));
+        stored = build.inst(IrCmd::STORE_INT, build.vmReg(0), selected);
+        jump = build.inst(IrCmd::JUMP_SWITCH, build.constInt(1), a, b);
+    });
+    updateUseCounts(build.function);
+    constantFold();
+    checkEq(stored, {IrCmd::STORE_INT, {build.vmReg(0), build.constInt(-1234)}});
+    CHECK(build.function.instOp(jump).cmd == IrCmd::JUMP);
+    CHECK(uint32_t(OP_A(build.function.instOp(jump)).index) == 2);
+}

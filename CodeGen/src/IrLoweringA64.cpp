@@ -363,6 +363,20 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         build.ldr(inst.regA64, addr);
         break;
     }
+    case IrCmd::LOAD_SWITCH_VALUE:
+    {
+        const Instruction* pc = function.proto->code + uintOp(OP_B(inst));
+        std::vector<int16_t> values(pc[2]);
+        for (size_t i = 0; i < values.size(); ++i)
+            values[i] = int16_t(LUAU_INSN_D(pc[4 + i]));
+        RegisterA64 base = regs.allocTemp(KindA64::x);
+        RegisterA64 offset = regs.allocTemp(KindA64::x);
+        build.adr(base, values.data(), values.size() * sizeof(int16_t));
+        build.lsl(offset, castReg(KindA64::x, regOp(OP_A(inst))), 1);
+        inst.regA64 = regs.allocReg(KindA64::w, index);
+        build.ldrsh(inst.regA64, mem(base, offset));
+        break;
+    }
     case IrCmd::LOAD_INT:
     {
         inst.regA64 = regs.allocReg(KindA64::w, index);
@@ -1595,6 +1609,20 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
             else
                 build.orr(inst.regA64, inst.regA64, temp);
         }
+        break;
+    }
+    case IrCmd::JUMP_SWITCH:
+    {
+        RegisterA64 target = regs.allocTemp(KindA64::x);
+        RegisterA64 offset = regs.allocTemp(KindA64::x);
+        Label table;
+        build.adr(target, table);
+        build.lsl(offset, castReg(KindA64::x, regOp(OP_A(inst))), 2);
+        build.add(target, target, offset);
+        build.br(target);
+        build.setLabel(table);
+        for (size_t i = 1; i < inst.ops.size(); ++i)
+            build.b(labelOp(inst.ops[i]));
         break;
     }
     case IrCmd::JUMP:

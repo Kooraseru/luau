@@ -468,6 +468,20 @@ private:
         LintGlobalLocal& p;
     };
 
+    bool visit(AstStatSwitch* node) override
+    {
+        node->subject->visit(this);
+        HoldConditionalExecution ce(*this);
+        for (const AstStatSwitchCase& switchCase : node->cases)
+        {
+            switchCase.value->visit(this);
+            switchCase.body->visit(this);
+        }
+        if (node->elsebody)
+            node->elsebody->visit(this);
+        return false;
+    }
+
     bool visit(AstStatIf* node) override
     {
         HoldConditionalExecution ce(*this);

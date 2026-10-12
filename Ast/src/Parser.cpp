@@ -357,10 +357,20 @@ Parser::Parser(const char* buffer, size_t bufferSize, AstNameTable& names, Alloc
     }
 }
 
+bool Parser::isContextualKeyword(const Lexeme& l, const char* keyword) const
+{
+    return l.type == Lexeme::Name && AstName(l.name) == keyword;
+}
+
 bool Parser::blockFollow(const Lexeme& l)
 {
     return l.type == Lexeme::Eof || l.type == Lexeme::ReservedElse || l.type == Lexeme::ReservedElseif || l.type == Lexeme::ReservedEnd ||
            l.type == Lexeme::ReservedUntil;
+}
+
+bool Parser::switchBlockFollow(const Lexeme& l)
+{
+    return blockFollow(l) || isContextualKeyword(l, "case");
 }
 
 AstStatBlock* Parser::parseChunk()
@@ -425,6 +435,37 @@ AstStatBlock* Parser::parseBlockNoScope()
     return allocator.alloc<AstStatBlock>(location, copy(body));
 }
 
+AstStatBlock* Parser::parseSwitchBlock()
+{
+    unsigned int localsBegin = saveLocals();
+    TempVector<AstStat*> body(scratchStat);
+    const Position prevPosition = lexer.previousLocation().end;
+
+    while (!switchBlockFollow(lexer.current()))
+    {
+        unsigned int oldRecursionCount = recursionCounter;
+        incrementRecursionCounter("switch block");
+        AstStat* stat = parseStat();
+        recursionCounter = oldRecursionCount;
+
+        if (lexer.current().type == ';')
+        {
+            nextLexeme();
+            stat->hasSemicolon = true;
+            stat->location.end = lexer.previousLocation().end;
+        }
+
+        body.push_back(stat);
+        if (isStatLast(stat))
+            break;
+    }
+
+    const Location location = Location(prevPosition, lexer.current().location.begin);
+    AstStatBlock* result = allocator.alloc<AstStatBlock>(location, copy(body));
+    restoreLocals(localsBegin);
+    return result;
+}
+
 // stat ::=
 // varlist `=' explist |
 // functioncall |
@@ -473,6 +514,9 @@ AstStat* Parser::parseStat()
     }
 
     Location start = lexer.current().location;
+
+    if (isContextualKeyword(lexer.current(), "switch"))
+        return parseSwitch();
 
     // we need to disambiguate a few cases, primarily assignment (lvalue = ...) vs statements-that-are calls
     AstExpr* expr = parsePrimaryExpr(/* asStatement= */ true);
@@ -573,6 +617,53 @@ AstStat* Parser::parseStat()
         nextLexeme();
 
     return reportStatError(expr->location, copy({expr}), {}, "Incomplete statement: expected assignment or a function call");
+}
+
+// switch exp {case exp then block} [else block] end
+//
+// Preserve the subject and source-ordered cases in a dedicated AST node.
+// The compiler evaluates the subject once and selects the dispatch strategy.
+AstStat* Parser::parseSwitch()
+{
+    Location start = lexer.current().location;
+    Lexeme matchSwitch = lexer.current();
+    nextLexeme(); // switch
+
+    AstExpr* subject = parseExpr();
+    TempVector<AstStatSwitchCase> cases(scratchSwitchCase);
+
+    while (isContextualKeyword(lexer.current(), "case"))
+    {
+        Location caseLocation = lexer.current().location;
+        nextLexeme(); // case
+
+        AstExpr* value = parseExpr();
+
+        Lexeme matchThen = lexer.current();
+        std::optional<Location> thenLocation;
+        if (expectAndConsume(Lexeme::ReservedThen, "switch case"))
+            thenLocation = matchThen.location;
+
+        AstStatBlock* body = parseSwitchBlock();
+        body->hasEnd = true;
+        cases.push_back({value, body, caseLocation, thenLocation});
+    }
+
+    AstStatBlock* elsebody = nullptr;
+    std::optional<Location> elseLocation;
+
+    if (lexer.current().type == Lexeme::ReservedElse)
+    {
+        elseLocation = lexer.current().location;
+        nextLexeme(); // else
+        elsebody = parseSwitchBlock();
+        elsebody->hasEnd = true;
+    }
+
+    Location end = lexer.current().location;
+    expectMatchEndAndConsume(Lexeme::ReservedEnd, matchSwitch);
+
+    return allocator.alloc<AstStatSwitch>(Location(start, end), subject, copy(cases), elsebody, elseLocation);
 }
 
 // if exp then block {elseif exp then block} [else block] end

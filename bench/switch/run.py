@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+# This file is part of the Luau programming language and is licensed under MIT License; see LICENSE.txt for details
+
+"""Build, validate, benchmark, and export the experimental switch implementation."""
+
+import json
+import subprocess
+import sys
+from paths import ROOT, ARTIFACTS, BYTECODE, GENERATED
+
+SIZES = (4, 16, 64, 256, 1024)
+KINDS = ("if", "switch", "table", "function-table")
+EXPECTED = {(size, kind) for size in SIZES for kind in KINDS}
+# The upstream parser rejects the 1024-branch elseif chain due to recursion depth.
+KNOWN_LIMIT = (1024, "if")
+
+
+def run(*args):
+    print(f"\n$ {' '.join(map(str, args))}", flush=True)
+    subprocess.run([str(arg) for arg in args], cwd=ROOT, check=True)
+
+
+def main():
+    if "--suite" in sys.argv:
+        from suite import main as suite_main
+        raise SystemExit(suite_main())
+    exe = ".exe" if sys.platform == "win32" else ""
+    build = ROOT / "build-release"
+    vm = build / f"luau{exe}"
+    compiler = build / f"luau-compile{exe}"
+    unit_tests = build / f"Luau.UnitTest{exe}"
+    output = ARTIFACTS / "switch-results"
+    bytecode = BYTECODE
+    bytecode.mkdir(parents=True, exist_ok=True)
+
+    run("cmake", "--build", build, "--target", "Luau.Repl.CLI", "Luau.UnitTest", "Luau.Compile.CLI", "-j", "4")
+    run(unit_tests)
+    for optimization in ("-O1", "-O2"):
+        run(vm, optimization, "bench/switch/dynamic-case-repro.luau")
+        run(vm, optimization, "bench/switch/regression.luau")
+    run(sys.executable, "bench/switch/generate.py")
+
+    for size in SIZES:
+        for kind in KINDS:
+            if (size, kind) == KNOWN_LIMIT:
+                continue
+            target = bytecode / f"{kind}-{size}.txt"
+            print(f"Disassembling {kind}-{size} -> {target.name}", flush=True)
+            with target.open("w", encoding="utf-8") as out:
+                subprocess.run(
+                    [str(compiler), "--text", "-O2", str(GENERATED / f"{kind}-{size}.luau")],
+                    cwd=ROOT, stdout=out, check=True,
+                )
+            if kind == "switch" and size >= 64 and "SELECTN" not in target.read_text(encoding="utf-8"):
+                raise SystemExit(f"Expected constant number selection bytecode in {target}")
+
+    run(sys.executable, "bench/switch/inspect_bytecode.py")
+
+    # The upstream harness can exit 0 even when individual benchmarks fail.
+    # Remove old outputs so an unsuccessful run cannot reuse a stale graph.
+    for extension in (".json", ".png", ".md"):
+        output.with_suffix(extension).unlink(missing_ok=True)
+
+    run(
+        sys.executable, "bench/bench.py",
+        "--folder", str(GENERATED),
+        "--vm", f"{vm.as_posix()} -O2",
+        "--filename", str(output),
+        "--absolute",
+    )
+
+    measurements = json.loads(output.with_suffix(".json").read_text())
+    observed = set()
+    for group in measurements:
+        if not group:
+            continue
+        result = group[0]
+        if len(result) < 5 or not isinstance(result[4], list) or not result[4]:
+            continue
+        name = result[3]
+        kind, sep, size = name.rpartition("-")
+        if sep and size.isdigit():
+            observed.add((int(size), kind))
+
+    missing = EXPECTED - observed
+    unexpected = missing - {KNOWN_LIMIT}
+    unknown = observed - EXPECTED
+    if unexpected or unknown:
+        raise SystemExit(f"Unexpected benchmark results: missing={sorted(unexpected)}, extra={sorted(unknown)}")
+    if missing:
+        print(f"Known compiler limitation: {sorted(missing)}", flush=True)
+
+    if not output.with_suffix(".png").is_file():
+        raise SystemExit("Benchmark graph was not generated")
+    run(sys.executable, "bench/switch/report.py", output.with_suffix(".json"))
+
+    report = output.with_suffix(".md")
+    print(f"\nReport: {report}", flush=True)
+    print(f"Benchmarks: {len(observed)}/{len(EXPECTED)} successful", flush=True)
+    print(f"Bytecode: {bytecode}", flush=True)
+
+
+if __name__ == "__main__":
+    main()

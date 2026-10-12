@@ -46,6 +46,18 @@ inline bool alwaysTerminates(const DenseHashMap<AstExpr*, Constant>& constants, 
     if (node->is<AstStatBreak>() || node->is<AstStatContinue>())
         return true;
 
+    if (AstStatSwitch* stat = node->as<AstStatSwitch>())
+    {
+        if (!stat->elsebody || !alwaysTerminates(constants, stat->elsebody))
+            return false;
+
+        for (const AstStatSwitchCase& switchCase : stat->cases)
+            if (!alwaysTerminates(constants, switchCase.body))
+                return false;
+
+        return true;
+    }
+
     if (AstStatIf* stat = node->as<AstStatIf>())
     {
         if (isConstantTrue(constants, stat->condition))

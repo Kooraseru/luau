@@ -419,6 +419,8 @@ ControlFlow DataFlowGraphBuilder::visit(AstStat* s)
 {
     if (auto b = s->as<AstStatBlock>())
         return visit(b);
+    else if (auto sw = s->as<AstStatSwitch>())
+        return visit(sw);
     else if (auto i = s->as<AstStatIf>())
         return visit(i);
     else if (auto w = s->as<AstStatWhile>())
@@ -466,6 +468,25 @@ ControlFlow DataFlowGraphBuilder::visit(AstStat* s)
         return visit(error);
     else
         handle->ice("Unknown AstStat in DataFlowGraphBuilder::visit");
+}
+
+ControlFlow DataFlowGraphBuilder::visit(AstStatSwitch* s)
+{
+    visitExpr(s->subject);
+    for (const AstStatSwitchCase& switchCase : s->cases)
+    {
+        visitExpr(switchCase.value);
+        DfgScope* caseScope = makeChildScope();
+        PushScope ps{scopeStack, caseScope};
+        visit(switchCase.body);
+    }
+    if (s->elsebody)
+    {
+        DfgScope* elseScope = makeChildScope();
+        PushScope ps{scopeStack, elseScope};
+        visit(s->elsebody);
+    }
+    return ControlFlow::None;
 }
 
 ControlFlow DataFlowGraphBuilder::visit(AstStatIf* i)

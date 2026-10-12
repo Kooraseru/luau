@@ -12,6 +12,10 @@ inline int getOpLength(LuauOpcode op)
 {
     switch (op)
     {
+    case LOP_SELECTN:
+        return 4;
+    case LOP_JUMPXTABLE:
+        return 3;
     case LOP_GETGLOBAL:
     case LOP_SETGLOBAL:
     case LOP_GETIMPORT:
@@ -75,6 +79,7 @@ inline bool isJumpD(LuauOpcode op)
     case LOP_JUMP:
     case LOP_JUMPIF:
     case LOP_JUMPIFNOT:
+    case LOP_JUMPIFNOTNUMBER:
     case LOP_JUMPIFEQ:
     case LOP_JUMPIFLE:
     case LOP_JUMPIFLT:

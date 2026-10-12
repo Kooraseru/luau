@@ -60,6 +60,8 @@ enum TableConstantKind
     NotConstant
 };
 
+bool constantsEqual(const Constant& left, const Constant& right);
+
 void buildTableConstantMap(DenseHashMap<AstLocal*, TableConstantKind>& result, const DenseHashMap<AstLocal*, Variable>& variables, AstNode* root);
 
 struct ExprConstantChange

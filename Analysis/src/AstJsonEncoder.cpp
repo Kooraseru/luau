@@ -733,6 +733,34 @@ struct AstJsonEncoder : public AstVisitor
         );
     }
 
+    void write(class AstStatSwitch* node)
+    {
+        writeNode(
+            node,
+            "AstStatSwitch",
+            [&]()
+            {
+                PROP(subject);
+                writeRaw(",\"cases\":[");
+                bool comma = false;
+                for (const AstStatSwitchCase& switchCase : node->cases)
+                {
+                    if (comma)
+                        writeRaw(",");
+                    comma = true;
+                    writeRaw("{\"value\":");
+                    write(switchCase.value);
+                    writeRaw(",\"body\":");
+                    write(switchCase.body);
+                    writeRaw("}");
+                }
+                writeRaw("]");
+                if (node->elsebody)
+                    PROP(elsebody);
+            }
+        );
+    }
+
     void write(class AstStatIf* node)
     {
         writeNode(
@@ -1359,6 +1387,12 @@ struct AstJsonEncoder : public AstVisitor
     }
 
     bool visit(class AstStatBlock* node) override
+    {
+        write(node);
+        return false;
+    }
+
+    bool visit(class AstStatSwitch* node) override
     {
         write(node);
         return false;

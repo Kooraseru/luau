@@ -723,7 +723,7 @@ void buildBytecodeBlocks(IrFunction& function, const std::vector<uint8_t>& jumpT
         const Instruction* pc = &proto->code[i];
         LuauOpcode op = LuauOpcode(LUAU_INSN_OP(*pc));
 
-        int nexti = i + getOpLength(op);
+        int nexti = i + getInstructionLength(pc);
 
         // If instruction is a jump target, begin new block starting from it
         if (i != 0 && jumpTargets[i])
@@ -735,7 +735,7 @@ void buildBytecodeBlocks(IrFunction& function, const std::vector<uint8_t>& jumpT
         int target = getJumpTarget(*pc, uint32_t(i));
 
         // Implicit fallthrough terminate the block and might start a new one
-        if (target >= 0 && !isFastCall(op))
+        if ((target >= 0 && !isFastCall(op)) || op == LOP_JUMPXTABLE)
         {
             bcBlocks.back().finishpc = i;
 
@@ -834,6 +834,7 @@ void analyzeBytecodeTypes(IrFunction& function, const HostIrHooks& hostHooks)
                 refineRegType(bcTypeInfo, ra, i, bcType.result);
                 break;
             }
+            case LOP_SELECTN:
             case LOP_LOADN:
             {
                 int ra = LUAU_INSN_A(*pc);
@@ -1450,6 +1451,8 @@ void analyzeBytecodeTypes(IrFunction& function, const HostIrHooks& hostHooks)
                 bcType.b = getRegTag(regTags, bcTypeInfo, rb, i);
                 break;
             }
+            case LOP_JUMPIFNOTNUMBER:
+            case LOP_JUMPXTABLE:
             case LOP_JUMPX:
             case LOP_JUMPXEQKNIL:
             case LOP_JUMPXEQKB:
@@ -1523,7 +1526,7 @@ void analyzeBytecodeTypes(IrFunction& function, const HostIrHooks& hostHooks)
                 CODEGEN_ASSERT(!"Unknown instruction");
             }
 
-            i += getOpLength(op);
+            i += getInstructionLength(pc);
         }
     }
 }

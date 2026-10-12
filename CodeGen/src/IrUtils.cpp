@@ -32,6 +32,10 @@ int getOpLength(LuauOpcode op)
 {
     switch (int(op))
     {
+    case LOP_SELECTN:
+        return 4;
+    case LOP_JUMPXTABLE:
+        return 3;
     case LOP_GETGLOBAL:
     case LOP_SETGLOBAL:
     case LOP_GETIMPORT:
@@ -70,10 +74,17 @@ int getOpLength(LuauOpcode op)
     }
 }
 
+int getInstructionLength(const uint32_t* pc)
+{
+    LuauOpcode op = LuauOpcode(LUAU_INSN_OP(*pc));
+    return getOpLength(op) + ((op == LOP_SELECTN || op == LOP_JUMPXTABLE) ? int(pc[2]) : 0);
+}
+
 bool isJumpD(LuauOpcode op)
 {
     switch (int(op))
     {
+    case LOP_JUMPIFNOTNUMBER:
     case LOP_JUMP:
     case LOP_JUMPIF:
     case LOP_JUMPIFNOT:
@@ -160,6 +171,7 @@ IrValueKind getCmdValueKind(IrCmd cmd)
         return IrValueKind::Pointer;
     case IrCmd::LOAD_DOUBLE:
         return IrValueKind::Double;
+    case IrCmd::LOAD_SWITCH_VALUE:
     case IrCmd::LOAD_INT:
         return IrValueKind::Int;
     case IrCmd::LOAD_FLOAT:
@@ -272,6 +284,7 @@ IrValueKind getCmdValueKind(IrCmd cmd)
     case IrCmd::JUMP_IF_TRUTHY:
     case IrCmd::JUMP_IF_FALSY:
     case IrCmd::JUMP_EQ_TAG:
+    case IrCmd::JUMP_SWITCH:
     case IrCmd::JUMP_CMP_INT:
     case IrCmd::JUMP_CMP_INT64:
     case IrCmd::JUMP_EQ_POINTER:
@@ -820,6 +833,23 @@ void foldConstants(IrBuilder& build, IrFunction& function, IrBlock& block, uint3
 
     switch (inst.cmd)
     {
+    case IrCmd::LOAD_SWITCH_VALUE:
+        if (OP_A(inst).kind == IrOpKind::Constant && function.proto)
+        {
+            const Instruction* pc = function.proto->code + function.uintOp(OP_B(inst));
+            unsigned slot = unsigned(function.intOp(OP_A(inst)));
+            CODEGEN_ASSERT(slot < pc[2]);
+            substitute(function, inst, build.constInt(LUAU_INSN_D(pc[4 + slot])));
+        }
+        break;
+    case IrCmd::JUMP_SWITCH:
+        if (OP_A(inst).kind == IrOpKind::Constant)
+        {
+            unsigned slot = unsigned(function.intOp(OP_A(inst)));
+            CODEGEN_ASSERT(slot + 1 < inst.ops.size());
+            replace(function, block, index, {IrCmd::JUMP, {inst.ops[slot + 1]}});
+        }
+        break;
     case IrCmd::ADD_INT:
         if (OP_A(inst).kind == IrOpKind::Constant && OP_B(inst).kind == IrOpKind::Constant)
         {

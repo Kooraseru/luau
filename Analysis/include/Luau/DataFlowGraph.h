@@ -156,6 +156,7 @@ private:
     ControlFlow visitBlockWithoutChildScope(AstStatBlock* b);
 
     ControlFlow visit(AstStat* s);
+    ControlFlow visit(AstStatSwitch* s);
     ControlFlow visit(AstStatIf* i);
     ControlFlow visit(AstStatWhile* w);
     ControlFlow visit(AstStatRepeat* r);

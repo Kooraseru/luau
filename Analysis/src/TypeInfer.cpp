@@ -338,6 +338,8 @@ ControlFlow TypeChecker::check(const ScopePtr& scope, const AstStat& program)
 
     if (auto block = program.as<AstStatBlock>())
         return check(scope, *block);
+    else if (auto switch_ = program.as<AstStatSwitch>())
+        return check(scope, *switch_);
     else if (auto if_ = program.as<AstStatIf>())
         return check(scope, *if_);
     else if (auto while_ = program.as<AstStatWhile>())
@@ -738,6 +740,43 @@ WithPredicate<TypeId> TypeChecker::checkLocalBinding(
     state.log.commit();
     bindingScope->bindings[local] = Binding{lhs, local->location};
     return {lhs, {TruthyPredicate{Symbol{local}, local->location}}};
+}
+
+ControlFlow TypeChecker::check(const ScopePtr& scope, const AstStatSwitch& statement)
+{
+    checkExpr(scope, *statement.subject);
+
+    ControlFlow commonFlow = ControlFlow::None;
+    bool haveFlow = false;
+
+    for (const AstStatSwitchCase& switchCase : statement.cases)
+    {
+        checkExpr(scope, *switchCase.value);
+        ScopePtr caseScope = childScope(scope, switchCase.body->location);
+        ControlFlow flow = check(caseScope, *switchCase.body);
+        if (!haveFlow)
+        {
+            commonFlow = flow;
+            haveFlow = true;
+        }
+        else if (flow != commonFlow)
+            commonFlow = ControlFlow::None;
+    }
+
+    if (statement.elsebody)
+    {
+        ScopePtr elseScope = childScope(scope, statement.elsebody->location);
+        ControlFlow flow = check(elseScope, *statement.elsebody);
+        if (!haveFlow)
+            commonFlow = flow;
+        else if (flow != commonFlow)
+            commonFlow = ControlFlow::None;
+        haveFlow = true;
+    }
+    else
+        commonFlow = ControlFlow::None;
+
+    return haveFlow ? commonFlow : ControlFlow::None;
 }
 
 ControlFlow TypeChecker::check(const ScopePtr& scope, const AstStatIf& statement)

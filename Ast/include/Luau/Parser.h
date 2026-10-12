@@ -95,6 +95,8 @@ private:
     Parser(const char* buffer, std::size_t bufferSize, AstNameTable& names, Allocator& allocator, const ParseOptions& options);
 
     bool blockFollow(const Lexeme& l);
+    bool switchBlockFollow(const Lexeme& l);
+    bool isContextualKeyword(const Lexeme& l, const char* keyword) const;
 
     AstStatBlock* parseChunk();
 
@@ -103,6 +105,7 @@ private:
     AstStatBlock* parseBlock();
 
     AstStatBlock* parseBlockNoScope();
+    AstStatBlock* parseSwitchBlock();
 
     // stat ::=
     // varlist `=' explist |
@@ -121,6 +124,10 @@ private:
 
     // if exp then block {elseif exp then block} [else block] end
     AstStat* parseIf();
+
+    // switch exp {case exp then block} [else block] end
+    // Initially lowered directly into a synthetic local plus an if/else chain.
+    AstStat* parseSwitch();
 
     // (`if' | `elseif') (`local' | `const') binding `=' exp then block ... end -- parses an entire `if local`/`if const`
     AstStat* parseIfLocalCondition(const Location& start);
@@ -566,6 +573,7 @@ private:
 
     std::vector<AstAttr*> scratchAttr;
     std::vector<AstStat*> scratchStat;
+    std::vector<AstStatSwitchCase> scratchSwitchCase;
     std::vector<AstArray<char>> scratchString;
     std::vector<AstArray<char>> scratchString2;
     std::vector<AstExpr*> scratchExpr;

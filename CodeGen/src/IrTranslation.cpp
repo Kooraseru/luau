@@ -14,6 +14,7 @@
 
 LUAU_FASTFLAG(LuauCodegenInteger3)
 LUAU_FASTFLAGVARIABLE(LuauCodegenIntegerCompare)
+LUAU_FASTFLAGVARIABLE(DebugLuauSwitchComparisonNative)
 LUAU_FASTFLAG(LuauBackedgeHeapCheck)
 LUAU_FASTFLAG(LuauFastpcallInterrupt)
 LUAU_FASTFLAG(DebugLuauUserDefinedClassesRuntime)
@@ -145,6 +146,94 @@ void translateInstMove(IrBuilder& build, const Instruction* pc)
 
     IrOp load = build.inst(IrCmd::LOAD_TVALUE, build.vmReg(rb));
     build.inst(IrCmd::STORE_TVALUE, build.vmReg(ra), load);
+}
+
+void translateInstSwitch(IrBuilder& build, const Instruction* pc, int pcpos)
+{
+    bool select = LUAU_INSN_OP(*pc) == LOP_SELECTN;
+    int subject = select ? LUAU_INSN_B(*pc) : LUAU_INSN_A(*pc);
+    int count = int(pc[2]);
+    int32_t first = int32_t(pc[1]);
+    IrOp next = build.blockAtInst(pcpos + getInstructionLength(pc));
+    IrOp miss = select ? build.block(IrBlockKind::Internal) : next;
+    IrOp numeric = build.block(IrBlockKind::Internal);
+    build.inst(IrCmd::JUMP_EQ_TAG, build.inst(IrCmd::LOAD_TAG, build.vmReg(subject)),
+        build.constTag(LUA_TNUMBER), numeric, miss);
+    build.beginBlock(numeric);
+
+    if (!FFlag::DebugLuauSwitchComparisonNative)
+    {
+        IrOp value = build.inst(IrCmd::LOAD_DOUBLE, build.vmReg(subject));
+        // Conversion can produce a sentinel for invalid numbers; bounds reject it
+        // unless it is a valid label. The exact comparison below rejects that case too.
+        IrOp integer = build.inst(IrCmd::NUM_TO_INT, value);
+        IrOp index = build.inst(IrCmd::SUB_INT, integer, build.constInt(first));
+        build.inst(IrCmd::CHECK_CMP_INT, index, build.constInt(count), build.cond(IrCondition::UnsignedLess), miss);
+        // Compare the original subject, so offset arithmetic cannot erase fractions.
+        build.inst(IrCmd::CHECK_CMP_NUM, value, build.inst(IrCmd::INT_TO_NUM, integer), build.cond(IrCondition::Equal), miss);
+        if (!select)
+        {
+            IrOps targets;
+            targets.push_back(index);
+            for (int i = 0; i < count; ++i)
+                targets.push_back(build.blockAtInst(pcpos + 4 + i + LUAU_INSN_E(pc[3 + i])));
+            build.inst(IrCmd::JUMP_SWITCH, targets);
+            return;
+        }
+        IrOp selected = build.inst(IrCmd::LOAD_SWITCH_VALUE,
+            index, build.constUint(pcpos));
+        build.inst(IrCmd::STORE_DOUBLE, build.vmReg(LUAU_INSN_A(*pc)), build.inst(IrCmd::INT_TO_NUM, selected));
+        build.inst(IrCmd::STORE_TAG, build.vmReg(LUAU_INSN_A(*pc)), build.constTag(LUA_TNUMBER));
+        build.inst(IrCmd::JUMP, next);
+        build.beginBlock(miss);
+        build.inst(IrCmd::STORE_DOUBLE, build.vmReg(LUAU_INSN_A(*pc)), build.constDouble(double(int32_t(pc[3]))));
+        build.inst(IrCmd::STORE_TAG, build.vmReg(LUAU_INSN_A(*pc)), build.constTag(LUA_TNUMBER));
+        build.inst(IrCmd::JUMP, next);
+        return;
+    }
+
+    // Equality at each pivot preserves fractional, NaN, infinity and non-number misses.
+    // Existing comparison IR supplies both native backends without indirect CFG edges.
+    auto tree = [&](auto&& self, int lo, int hi) -> void {
+        int pivot = lo + (hi - lo) / 2;
+        IrOp hit = select ? build.block(IrBlockKind::Internal)
+                          : build.blockAtInst(pcpos + 4 + pivot + LUAU_INSN_E(pc[3 + pivot]));
+        IrOp unequal = hi - lo == 1 ? miss : build.block(IrBlockKind::Internal);
+        IrOp key = build.constDouble(double(first) + pivot);
+        build.inst(IrCmd::JUMP_CMP_NUM, build.inst(IrCmd::LOAD_DOUBLE, build.vmReg(subject)), key, build.cond(IrCondition::NotEqual), unequal, hit);
+        if (select)
+        {
+            build.beginBlock(hit);
+            build.inst(IrCmd::STORE_DOUBLE, build.vmReg(LUAU_INSN_A(*pc)), build.constDouble(LUAU_INSN_D(pc[4 + pivot])));
+            build.inst(IrCmd::STORE_TAG, build.vmReg(LUAU_INSN_A(*pc)), build.constTag(LUA_TNUMBER));
+            build.inst(IrCmd::JUMP, next);
+        }
+        if (hi - lo > 1)
+        {
+            build.beginBlock(unequal);
+            IrOp left = lo < pivot ? build.block(IrBlockKind::Internal) : miss;
+            IrOp right = pivot + 1 < hi ? build.block(IrBlockKind::Internal) : miss;
+            build.inst(IrCmd::JUMP_CMP_NUM, build.inst(IrCmd::LOAD_DOUBLE, build.vmReg(subject)), key, build.cond(IrCondition::Less), left, right);
+            if (lo < pivot)
+            {
+                build.beginBlock(left);
+                self(self, lo, pivot);
+            }
+            if (pivot + 1 < hi)
+            {
+                build.beginBlock(right);
+                self(self, pivot + 1, hi);
+            }
+        }
+    };
+    tree(tree, 0, count);
+    if (select)
+    {
+        build.beginBlock(miss);
+        build.inst(IrCmd::STORE_DOUBLE, build.vmReg(LUAU_INSN_A(*pc)), build.constDouble(double(int32_t(pc[3]))));
+        build.inst(IrCmd::STORE_TAG, build.vmReg(LUAU_INSN_A(*pc)), build.constTag(LUA_TNUMBER));
+        build.inst(IrCmd::JUMP, next);
+    }
 }
 
 void translateInstJump(IrBuilder& build, const Instruction* pc, int pcpos)

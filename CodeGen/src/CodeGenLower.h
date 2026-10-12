@@ -4,6 +4,7 @@
 #include "Luau/AssemblyBuilderA64.h"
 #include "Luau/AssemblyBuilderX64.h"
 #include "Luau/CodeGen.h"
+#include "Luau/BytecodeUtils.h"
 #include "Luau/IrBuilder.h"
 #include "Luau/IrDump.h"
 #include "Luau/IrUtils.h"

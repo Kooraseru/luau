@@ -133,6 +133,7 @@ private:
     // Clip with LuauDontUseInnermostScope
     Scope* findInnermostScope_DEPRECATED(Location location) const;
     void visit(AstStat* stat);
+    void visit(AstStatSwitch* switchStatement);
     void visit(AstStatIf* ifStatement);
     void visit(AstStatWhile* whileStatement);
     void visit(AstStatRepeat* repeatStatement);

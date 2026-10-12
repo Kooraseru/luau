@@ -106,6 +106,8 @@ const char* getCmdName(IrCmd cmd)
         return "LOAD_TAG";
     case IrCmd::LOAD_POINTER:
         return "LOAD_POINTER";
+    case IrCmd::LOAD_SWITCH_VALUE:
+        return "LOAD_SWITCH_VALUE";
     case IrCmd::LOAD_DOUBLE:
         return "LOAD_DOUBLE";
     case IrCmd::LOAD_INT:
@@ -284,6 +286,8 @@ const char* getCmdName(IrCmd cmd)
         return "JUMP_IF_FALSY";
     case IrCmd::JUMP_EQ_TAG:
         return "JUMP_EQ_TAG";
+    case IrCmd::JUMP_SWITCH:
+        return "JUMP_SWITCH";
     case IrCmd::JUMP_CMP_INT:
         return "JUMP_CMP_INT";
     case IrCmd::JUMP_CMP_INT64:

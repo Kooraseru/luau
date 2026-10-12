@@ -133,7 +133,7 @@ unsigned getInstructionCount(const Instruction* insns, const unsigned size)
     for (unsigned i = 0; i < size;)
     {
         ++count;
-        i += getOpLength(LuauOpcode(LUAU_INSN_OP(insns[i])));
+        i += getInstructionLength(insns + i);
     }
     return count;
 }
