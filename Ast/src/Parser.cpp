@@ -35,6 +35,7 @@ LUAU_FASTFLAGVARIABLE(DebugLuauParseExactTables)
 LUAU_FASTFLAGVARIABLE(LuauExperimentalIfLocalSyntax)
 LUAU_FLAGVERSION(LuauExperimentalIfLocalSyntax, 2)
 LUAU_FASTFLAGVARIABLE(LuauExperimentalWhileLocalSyntax)
+LUAU_DYNAMIC_FASTFLAGVARIABLE(DebugLuauSwitchStatement, true)
 
 // Clip with DebugLuauReportReturnTypeVariadicWithTypeSuffix
 bool luau_telemetry_parsed_return_type_variadic_with_type_suffix = false;
@@ -516,7 +517,7 @@ AstStat* Parser::parseStat()
 
     Location start = lexer.current().location;
 
-    if (isContextualKeyword(lexer.current(), "switch"))
+    if (DFFlag::DebugLuauSwitchStatement && isContextualKeyword(lexer.current(), "switch"))
         return parseSwitch();
 
     // we need to disambiguate a few cases, primarily assignment (lvalue = ...) vs statements-that-are calls

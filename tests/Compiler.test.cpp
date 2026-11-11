@@ -43,6 +43,7 @@ LUAU_FASTFLAG(LuauCompileReuseLocalRegs)
 LUAU_FASTFLAG(LuauCompileTableBuiltinsCreateClear)
 LUAU_FASTFLAG(LuauCompileReuseLowersLimit)
 LUAU_FASTFLAG(LuauExperimentalWhileLocalSyntax)
+LUAU_DYNAMIC_FASTFLAG(DebugLuauSwitchStatement)
 
 using namespace Luau;
 
@@ -15693,6 +15694,13 @@ TEST_CASE("SwitchConstantNumberSelection")
     options.coverageLevel = 1;
     Luau::compileOrThrow(covered, source(24), options);
     CHECK(covered.dumpFunction(0).find("SELECTN") == std::string::npos);
+}
+
+TEST_CASE("SwitchSyntaxFeatureFlag")
+{
+    ScopedFastFlag disabled(DFFlag::DebugLuauSwitchStatement, false);
+    CHECK_NOTHROW(compileFunction("local function switch(value) return value end return switch(1)", 0, 1));
+    CHECK_THROWS(compileFunction("switch 1 case 1 then return 1 end", 0, 1));
 }
 
 TEST_SUITE_END();
