@@ -15,8 +15,9 @@
 #include "Luau/TypeUtils.h"
 #include "Luau/Unifier2.h"
 
+#include <stdlib.h>
+
 LUAU_FASTFLAGVARIABLE(LuauBidirectionalInferenceBetterLambdaHandling)
-LUAU_FASTFLAG(LuauBidirectionalInferenceSetMetatable)
 
 namespace Luau
 {
@@ -78,8 +79,8 @@ struct FindFunctionTypeIn : IterativeTypeVisitor
                 return false;
             }
 
-            int candidateDistance = std::abs(int(size(candidate->argTypes)) - numberOfLambdaParameters);
-            int thisDistance = std::abs(int(size(ftv.argTypes)) - numberOfLambdaParameters);
+            int candidateDistance = abs(int(size(candidate->argTypes)) - numberOfLambdaParameters);
+            int thisDistance = abs(int(size(ftv.argTypes)) - numberOfLambdaParameters);
 
             if (thisDistance < candidateDistance)
             {
@@ -94,7 +95,7 @@ struct FindFunctionTypeIn : IterativeTypeVisitor
         else
         {
             if (candidate == nullptr ||
-                std::abs(int(size(candidate->argTypes)) - numberOfLambdaParameters) > std::abs(int(size(ftv.argTypes)) - numberOfLambdaParameters))
+                abs(int(size(candidate->argTypes)) - numberOfLambdaParameters) > abs(int(size(ftv.argTypes)) - numberOfLambdaParameters))
             {
                 candidate = get<FunctionType>(ty);
                 return false;
@@ -111,11 +112,8 @@ struct FindFunctionTypeIn : IterativeTypeVisitor
  */
 bool isCheckableExpr(const AstExpr* expr)
 {
-    if (FFlag::LuauBidirectionalInferenceSetMetatable)
-    {
-        if (const AstExprCall* call = expr->as<AstExprCall>(); call && matchSetMetatable(*call))
-            return true;
-    }
+    if (const AstExprCall* call = expr->as<AstExprCall>(); call && matchSetMetatable(*call))
+        return true;
 
     return isLiteral(expr) || expr->is<AstExprGroup>() || expr->is<AstExprIfElse>();
 }
@@ -219,18 +217,15 @@ struct BidirectionalTypePusher
             return exprType;
         }
 
-        if (FFlag::LuauBidirectionalInferenceSetMetatable)
+        if (const AstExprCall* call = expr->as<AstExprCall>(); call && matchSetMetatable(*call))
         {
-            if (const AstExprCall* call = expr->as<AstExprCall>(); call && matchSetMetatable(*call))
+            if (const MetatableType* expectedMetatable = get<MetatableType>(expectedType))
             {
-                if (const MetatableType* expectedMetatable = get<MetatableType>(expectedType))
-                {
-                    pushType(expectedMetatable->table, call->args.data[0]);
-                    pushType(expectedMetatable->metatable, call->args.data[1]);
-                }
-
-                return exprType;
+                pushType(expectedMetatable->table, call->args.data[0]);
+                pushType(expectedMetatable->metatable, call->args.data[1]);
             }
+
+            return exprType;
         }
 
         if (expr->is<AstExprConstantString>() || expr->is<AstExprConstantNumber>() || expr->is<AstExprConstantBool>() ||

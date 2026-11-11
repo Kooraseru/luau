@@ -619,13 +619,6 @@ struct UninitializedFieldAccess
     bool operator==(const UninitializedFieldAccess& rhs) const;
 };
 
-struct TypeAnnotationRequired
-{
-    TypeId inferredTy;
-
-    bool operator==(const TypeAnnotationRequired& rhs) const;
-};
-
 struct ConstructorsShouldNotReturnAnything
 {
     bool operator==(const ConstructorsShouldNotReturnAnything&) const
@@ -663,6 +656,30 @@ struct IncompatibleClassMethodOverride
     Name superName;
 
     bool operator==(const IncompatibleClassMethodOverride& rhs) const;
+};
+
+struct IllegalClassPropertyOverride
+{
+    Name property;
+    Name className;
+    Name superName;
+
+    bool operator==(const IllegalClassPropertyOverride& rhs) const;
+};
+
+struct MissingConstructor
+{
+    Name className;
+    Name superName;
+
+    bool operator==(const MissingConstructor& rhs) const;
+};
+
+struct NotIterable
+{
+    TypeId ty;
+
+    bool operator==(const NotIterable& rhs) const;
 };
 
 using TypeErrorData = Variant<
@@ -731,11 +748,13 @@ using TypeErrorData = Variant<
     TypeInstantiationCountMismatch,
     AmbiguousFunctionCall,
     UninitializedFieldAccess,
-    TypeAnnotationRequired,
     ConstructorsShouldNotReturnAnything,
     CyclicClassInheritance,
     InvalidClassExtension,
-    IncompatibleClassMethodOverride>;
+    IncompatibleClassMethodOverride,
+    IllegalClassPropertyOverride,
+    MissingConstructor,
+    NotIterable>;
 
 struct TypeErrorSummary
 {

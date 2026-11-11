@@ -13,6 +13,7 @@
 LUAU_FASTFLAG(DebugLuauFreezeArena)
 LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
 LUAU_FASTFLAG(LuauExperimentalIfLocalAnalysis)
+LUAU_FASTFLAG(LuauExperimentalWhileLocalAnalysis)
 
 namespace Luau
 {
@@ -392,7 +393,7 @@ ControlFlow DataFlowGraphBuilder::visitBlockWithoutChildScope(AstStatBlock* b)
     // DefIds for them.
     if (FFlag::DebugLuauUserDefinedClasses)
     {
-        for (AstStat* stat: b->body)
+        for (AstStat* stat : b->body)
         {
             if (auto d = stat->as<AstStatClass>())
             {
@@ -493,6 +494,9 @@ ControlFlow DataFlowGraphBuilder::visit(AstStatIf* i)
 {
     visitExpr(i->condition);
 
+    if (FFlag::LuauExperimentalIfLocalAnalysis && i->conditionLocal && i->conditionLocal->annotation)
+        visitType(i->conditionLocal->annotation);
+
     DfgScope* thenScope = makeChildScope();
     DfgScope* elseScope = makeChildScope();
 
@@ -556,6 +560,17 @@ ControlFlow DataFlowGraphBuilder::visit(AstStatWhile* w)
     {
         PushScope ps{scopeStack, whileScope};
         visitExpr(w->condition);
+
+        if (FFlag::LuauExperimentalWhileLocalAnalysis && w->conditionLocal)
+        {
+            DefId def = defArena->freshCell(w->conditionLocal, w->conditionLocal->location, false);
+            if (w->conditionLocal->annotation)
+                visitType(w->conditionLocal->annotation);
+            graph.localDefs[w->conditionLocal] = def;
+            whileScope->bindings[w->conditionLocal] = def;
+            captures[w->conditionLocal].allVersions.push_back(def);
+        }
+
         cf = visit(w->body);
     }
 
@@ -1240,6 +1255,9 @@ DataFlowResult DataFlowGraphBuilder::visitExpr(AstExprIfElse* i)
 
     if (FFlag::LuauExperimentalIfLocalAnalysis && i->conditionLocal)
     {
+        if (i->conditionLocal->annotation)
+            visitType(i->conditionLocal->annotation);
+
         DfgScope* thenScope = makeChildScope();
         {
             PushScope ps{scopeStack, thenScope};

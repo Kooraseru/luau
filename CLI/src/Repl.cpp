@@ -53,6 +53,7 @@ constexpr int MaxTraversalLimit = 50;
 
 static bool codegen = false;
 static bool codegenCold = false;
+static bool codegenLazy = false;
 static bool nativeReport = false;
 static int (*reportedNativeEnter)(lua_State*, Proto*) = nullptr;
 static std::vector<unsigned> nativeEntries;
@@ -209,7 +210,7 @@ void* createCliRequireContext(lua_State* L)
         coverageActive,
         []()
         {
-            return codegen;
+            return codegen && !codegenLazy;
         },
         coverageTrack,
         countersActive,
@@ -642,14 +643,21 @@ static bool runFile(const char* name, lua_State* GL, bool repl)
             if (countersActive())
                 nativeOptions.recordCounters = true;
 
-            Luau::CodeGen::CompilationStats stats;
-            Luau::CodeGen::CompilationResult result = Luau::CodeGen::compile(L, -1, nativeOptions, nativeReport ? &stats : nullptr);
-            if (nativeReport)
+            nativeOptions.runtimeFeedback = true;
+
+            Luau::CodeGen::enableRuntimeCompilation(L, nativeOptions, codegenLazy);
+
+            if (!codegenLazy)
             {
-                fprintf(stderr, "NATIVE_COMPILE\t%s\t%u\t%u\t%u\n", Luau::CodeGen::toString(result.result).c_str(),
-                    stats.functionsTotal, stats.functionsCompiled, stats.functionsBound);
-                for (const auto& failure : result.protoFailures)
-                    fprintf(stderr, "NATIVE_FAILURE\t%s\t%s\n", failure.debugname.c_str(), Luau::CodeGen::toString(failure.result).c_str());
+                Luau::CodeGen::CompilationStats stats;
+                Luau::CodeGen::CompilationResult result = Luau::CodeGen::compile(L, -1, nativeOptions, nativeReport ? &stats : nullptr);
+                if (nativeReport)
+                {
+                    fprintf(stderr, "NATIVE_COMPILE\t%s\t%u\t%u\t%u\n", Luau::CodeGen::toString(result.result).c_str(),
+                        stats.functionsTotal, stats.functionsCompiled, stats.functionsBound);
+                    for (const auto& failure : result.protoFailures)
+                        fprintf(stderr, "NATIVE_FAILURE\t%s\t%s\n", failure.debugname.c_str(), Luau::CodeGen::toString(failure.result).c_str());
+                }
             }
         }
 
@@ -726,6 +734,7 @@ static void displayHelp(const char* argv0)
     printf("  --codegen: execute code using native code generation\n");
     printf("  --native-report: report compiled protos and native gate entries (diagnostic; use separately from timings)\n");
     printf("  --codegen-cold: execute code using native code generation, including any functions deemed not profitable to natively compile\n");
+    printf("  --codegen-lazy: execute code in the VM and compile hot functions to native automatically\n");
     printf("  --codegen-perf: execute code using native code generation and profile using perf (only on Linux)\n");
     printf("  --program-args,-a: declare start of arguments to be passed to the Luau program\n");
     printf("  --fflags=<flags>: comma-separated list of fast flags to enable/disable (--fflags=true,false,LuauFlag1=true,LuauFlag2=false).\n");
@@ -804,6 +813,11 @@ int replMain(int argc, char** argv)
         {
             codegen = true;
             codegenCold = true;
+        }
+        else if (strcmp(argv[i], "--codegen-lazy") == 0)
+        {
+            codegen = true;
+            codegenLazy = true;
         }
         else if (strcmp(argv[i], "--codegen-perf") == 0)
         {

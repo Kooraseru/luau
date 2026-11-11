@@ -1032,18 +1032,6 @@ struct ErrorConverter
             return "Access to 'self' before all of its fields have been initialized";
     }
 
-    std::string operator()(const TypeAnnotationRequired& err) const
-    {
-        ToStringOptions opts;
-        opts.functionTypeArguments = true;
-        opts.ignoreSyntheticName = true;
-        auto tos = toStringDetailed(err.inferredTy, opts);
-        if (!tos.invalid && !tos.truncated && !tos.error)
-            return "Type annotation required here.  Consider " + tos.name;
-        else
-            return "Type annotation required here.  Unable to infer the type of this function.";
-    }
-
     std::string operator()(const ConstructorsShouldNotReturnAnything&) const
     {
         return "Class constructors should not return anything.";
@@ -1068,22 +1056,45 @@ struct ErrorConverter
     {
         switch (e.context)
         {
-            case InvalidClassExtension::ClassIsNotOpen:
-                return "Non-open class " + toString(e.baseClass) + " cannot be extended";
-            case InvalidClassExtension::BaseIsClassInstance:
-                return "Object of type " + toString(e.baseClass) + " cannot be extended because it is an object, not a class";
-            case InvalidClassExtension::NotAClass:
-                return "Cannot extend non-class of type " + toString(e.baseClass);
-            default:
-                LUAU_ASSERT(0);
-                return "Cannot extend non-class of type " + toString(e.baseClass);
+        case InvalidClassExtension::ClassIsNotOpen:
+            return "Non-open class " + toString(e.baseClass) + " cannot be extended";
+        case InvalidClassExtension::BaseIsClassInstance:
+            return "Object of type " + toString(e.baseClass) + " cannot be extended because it is an object, not a class";
+        case InvalidClassExtension::NotAClass:
+            return "Cannot extend non-class of type " + toString(e.baseClass);
+        default:
+            LUAU_ASSERT(0);
+            return "Cannot extend non-class of type " + toString(e.baseClass);
         }
     }
 
     std::string operator()(const IncompatibleClassMethodOverride& e) const
     {
-        return "Method '" + e.method + "' on class '" + e.className + "' is not a compatible override of the method inherited from superclass '" +
-               e.superName + "'";
+        if (e.method == "__eq" || e.method == "__lt" || e.method == "__le")
+        {
+            return "Illegal override of comparison metamethod '" + e.method + "' on class '" + e.className + "' inherited from superclass '" +
+                   e.superName + "'";
+        }
+        else
+        {
+            return "Method '" + e.method + "' on class '" + e.className + "' is not a compatible override of the method inherited from superclass '" +
+                   e.superName + "'";
+        }
+    }
+
+    std::string operator()(const IllegalClassPropertyOverride& e) const
+    {
+        return "Illegal override of property '" + e.property + "' on class '" + e.className + "' inherited from superclass '" + e.superName + "'";
+    }
+
+    std::string operator()(const MissingConstructor& e) const
+    {
+        return "'" + e.className + "' inherits a constructor from '" + e.superName + "', so it needs to define one too";
+    }
+
+    std::string operator()(const NotIterable& e) const
+    {
+        return "`" + toString(e.ty) + "` is not iterable";
     }
 };
 
@@ -1332,6 +1343,21 @@ bool IncompatibleClassMethodOverride::operator==(const IncompatibleClassMethodOv
     return method == rhs.method && className == rhs.className && superName == rhs.superName;
 }
 
+bool IllegalClassPropertyOverride::operator==(const IllegalClassPropertyOverride& rhs) const
+{
+    return property == rhs.property && className == rhs.className && superName == rhs.superName;
+}
+
+bool MissingConstructor::operator==(const MissingConstructor& rhs) const
+{
+    return className == rhs.className && superName == rhs.superName;
+}
+
+bool NotIterable::operator==(const NotIterable& rhs) const
+{
+    return ty == rhs.ty;
+}
+
 int TypeError::code() const
 {
     return minCode() + int(data.index());
@@ -1549,11 +1575,6 @@ bool UnappliedTypeFunction::operator==(const UnappliedTypeFunction& rhs) const
 bool AmbiguousFunctionCall::operator==(const AmbiguousFunctionCall& rhs) const
 {
     return function == rhs.function && arguments == rhs.arguments;
-}
-
-bool TypeAnnotationRequired::operator==(const TypeAnnotationRequired& rhs) const
-{
-    return inferredTy == rhs.inferredTy;
 }
 
 bool UninitializedFieldAccess::operator==(const UninitializedFieldAccess& rhs) const
@@ -1824,10 +1845,6 @@ void copyError(T& e, TypeArena& destArena, CloneState& cloneState)
     else if constexpr (std::is_same_v<T, UninitializedFieldAccess>)
     {
     }
-    else if constexpr (std::is_same_v<T, TypeAnnotationRequired>)
-    {
-        e.inferredTy = clone(e.inferredTy);
-    }
     else if constexpr (std::is_same_v<T, ConstructorsShouldNotReturnAnything>)
     {
     }
@@ -1840,6 +1857,16 @@ void copyError(T& e, TypeArena& destArena, CloneState& cloneState)
     }
     else if constexpr (std::is_same_v<T, IncompatibleClassMethodOverride>)
     {
+    }
+    else if constexpr (std::is_same_v<T, IllegalClassPropertyOverride>)
+    {
+    }
+    else if constexpr (std::is_same_v<T, MissingConstructor>)
+    {
+    }
+    else if constexpr (std::is_same_v<T, NotIterable>)
+    {
+        e.ty = clone(e.ty);
     }
     else
         static_assert(always_false_v<T>, "Non-exhaustive type switch");

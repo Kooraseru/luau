@@ -18,7 +18,6 @@
 LUAU_FASTFLAG(DebugLuauExactTableTypes)
 LUAU_DYNAMIC_FASTINTVARIABLE(LuauSimplificationComplexityLimit, 8)
 LUAU_DYNAMIC_FASTINTVARIABLE(LuauTypeSimplificationIterationLimit, 128)
-LUAU_FASTFLAGVARIABLE(LuauRelateIndexersTypo)
 LUAU_FASTFLAG(LuauDecomposeIntersectionOfFreeType)
 
 namespace Luau
@@ -407,16 +406,8 @@ Relation relateTables_DEPRECATED(const TableType* leftTable, const TableType* ri
     if (relate(leftTable->indexer->indexType, rightTable->indexer->indexType, seen) != Relation::Coincident)
         return Relation::Intersects;
 
-    if (FFlag::LuauRelateIndexersTypo)
-    {
-        if (relate(leftTable->indexer->indexResultType, rightTable->indexer->indexResultType, seen) != Relation::Coincident)
-            return Relation::Intersects;
-    }
-    else
-    {
-        if (relate(leftTable->indexer->indexType, rightTable->indexer->indexType, seen) != Relation::Coincident)
-            return Relation::Intersects;
-    }
+    if (relate(leftTable->indexer->indexResultType, rightTable->indexer->indexResultType, seen) != Relation::Coincident)
+        return Relation::Intersects;
 
     return hasSubset ? Relation::Subset : Relation::Coincident;
 }
@@ -1440,7 +1431,7 @@ static std::optional<TableType> combineDisjointTables(const TableType* left, con
     res.state = TableState::Sealed;
     res.props = left->props;
 
-    for (const auto& [name, prop]: right->props)
+    for (const auto& [name, prop] : right->props)
     {
         if (res.props.count(name) != 0)
             return std::nullopt;
