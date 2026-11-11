@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - 'master'
-      - 'switch-dispatch-optimization'
     paths-ignore:
       - 'docs/**'
       - 'papers/**'
