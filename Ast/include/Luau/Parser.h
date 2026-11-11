@@ -133,10 +133,20 @@ private:
     AstStat* parseIfLocalCondition(const Location& start);
 
     // Parse the trailing `{elseif exp then block} [else block] end` shared by `parseIf` and `parseIfLocalCondition`
-    AstStat* parseElseBody(const Location& start, const Lexeme& matchThen, AstStatBlock* thenbody, Location& end, std::optional<Location>& elseLocation);
+    AstStat* parseElseBody(
+        const Location& start,
+        const Lexeme& matchThen,
+        AstStatBlock* thenbody,
+        Location& end,
+        std::optional<Location>& elseLocation
+    );
 
     // while exp do block end
     AstStat* parseWhile();
+
+    // while `local' binding `=' exp do block end -- parses an entire `while local`.
+    // `start` is the location of the already-consumed `while` keyword; the current lexeme is `local`.
+    AstStat* parseWhileLocalCondition(const Location& start);
 
     // repeat block until exp
     AstStat* parseRepeat();
@@ -559,6 +569,10 @@ private:
 
     std::vector<Function> functionStack;
     size_t typeFunctionDepth = 0;
+
+    // True while parsing the body of a class method, which is the only context where `._x` / `:_x` denotes a private member access. Set exclusively
+    // by parseClassStat.
+    bool inClassMethodBody = false;
 
     DenseHashMap<AstName, AstLocal*> localMap;
     std::vector<AstLocal*> localStack;

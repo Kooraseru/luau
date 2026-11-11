@@ -5,6 +5,7 @@
 #include "Luau/BytecodeCallInliner.h"
 #include "Luau/BytecodeDump.h"
 #include "Luau/BytecodeGraph.h"
+#include "Luau/BytecodeSlotAllocation.h"
 #include "Luau/BytecodeUtils.h"
 #include "Luau/Common.h"
 #include "Luau/Sccp.h"
@@ -29,6 +30,10 @@ LUAU_FASTINTVARIABLE(LuauJitInlineSmallFunSize, 128)
 LUAU_FASTINTVARIABLE(LuauJitInlineTooLongFunSize, 0xFFFF);
 LUAU_FASTFLAG(LuauCompileRefactorFeedback)
 LUAU_FASTFLAGVARIABLE(LuauBytecodeFold)
+LUAU_FASTFLAGVARIABLE(LuauBytecodeSlotAlloc)
+LUAU_FASTFLAGVARIABLE(DebugLuauBytecodeSlotAllocStats)
+LUAU_FASTFLAG(LuauRuntimeFeedback)
+LUAU_FASTFLAG(LuauSkipDebugLocked)
 
 using namespace Luau::Bytecode;
 
@@ -243,6 +248,9 @@ Proto* createInlinedProto(lua_State* L, Proto* caller, Proto* target, RuntimeBcF
     p->bytecodeid = caller->bytecodeid;
     p->cost = caller->cost;
 
+    if (FFlag::LuauRuntimeFeedback || FFlag::LuauSkipDebugLocked)
+        p->execflags = caller->execflags;
+
     uint32_t feedbackvecsize = caller->feedbackvecsize + target->feedbackvecsize;
     p->feedbackvec = luaM_newarray(L, feedbackvecsize, FeedbackVectorSlot, L->activememcat);
     p->feedbackvecsize = feedbackvecsize;
@@ -359,36 +367,36 @@ bool isEnvDependentOrUsesSelect(Proto* proto, bool crossEnv)
     {
         switch (LUAU_INSN_OP(*pc))
         {
-            case LOP_GETIMPORT:
-            {
-                uint16_t importKIndex = LUAU_INSN_D(*pc);
-                LUAU_ASSERT(importKIndex < static_cast<uint16_t>(proto->sizek));
-                // if import is unresolved we cannot inline target, because globals can differ in the caller's env.
-                if (crossEnv && ttisnil(proto->k + importKIndex))
-                    return true;
-                break;
-            }
-            case LOP_GETGLOBAL:
-            case LOP_SETGLOBAL:
-            case LOP_NEWCLOSURE:
-            case LOP_DUPCLOSURE:
-            {
-                if (crossEnv)
-                    return true;
-                break;
-            }
-            case LOP_FASTCALL1:
-            case LOP_FASTCALL2:
-            case LOP_FASTCALL2K:
-            case LOP_FASTCALL3:
-            case LOP_FASTCALL:
-            {
-                if (LUAU_INSN_A(*pc) == LBF_SELECT_VARARG)
-                    return true;
-                break;
-            }
-            default:
-                break;
+        case LOP_GETIMPORT:
+        {
+            uint16_t importKIndex = LUAU_INSN_D(*pc);
+            LUAU_ASSERT(importKIndex < static_cast<uint16_t>(proto->sizek));
+            // if import is unresolved we cannot inline target, because globals can differ in the caller's env.
+            if (crossEnv && ttisnil(proto->k + importKIndex))
+                return true;
+            break;
+        }
+        case LOP_GETGLOBAL:
+        case LOP_SETGLOBAL:
+        case LOP_NEWCLOSURE:
+        case LOP_DUPCLOSURE:
+        {
+            if (crossEnv)
+                return true;
+            break;
+        }
+        case LOP_FASTCALL1:
+        case LOP_FASTCALL2:
+        case LOP_FASTCALL2K:
+        case LOP_FASTCALL3:
+        case LOP_FASTCALL:
+        {
+            if (LUAU_INSN_A(*pc) == LBF_SELECT_VARARG)
+                return true;
+            break;
+        }
+        default:
+            break;
         }
         pc += Luau::getOpLength(static_cast<LuauOpcode>(LUAU_INSN_OP(*pc)));
     }
@@ -418,12 +426,24 @@ Proto* onInlineFunction(lua_State* L, Closure* caller, Closure* target, uint32_t
     if (caller->env->safeenv == 0 || target->env->safeenv == 0)
         return nullptr;
 
-    if (isEnvDependentOrUsesSelect(targetProto, caller->env != target->env))
-        return nullptr;
+    if (!FFlag::LuauSkipDebugLocked)
+    {
+        if (isEnvDependentOrUsesSelect(targetProto, caller->env != target->env))
+            return nullptr;
+    }
 
     // pick the latest optimized version for inlining
     while (targetProto->optimized != nullptr)
         targetProto = targetProto->optimized;
+
+    if (FFlag::LuauSkipDebugLocked)
+    {
+        if (((callerProto->execflags | targetProto->execflags) & PEF_DEBUGLOCKED) != 0)
+            return nullptr;
+
+        if (isEnvDependentOrUsesSelect(targetProto, caller->env != target->env))
+            return nullptr;
+    }
 
     if (callerProto->sizecode > FInt::LuauJitInlineTooLongFunSize || targetProto->sizecode > FInt::LuauJitInlineTooLongFunSize)
         return nullptr;
@@ -468,6 +488,23 @@ Proto* onInlineFunction(lua_State* L, Closure* caller, Closure* target, uint32_t
     {
         impl.emplace(L, callerGraph->first);
         foldConstants(callerGraph->first, *impl);
+    }
+
+    if (FFlag::LuauBytecodeSlotAlloc)
+    {
+        SlotAllocationResult allocation = allocateBytecodeSlots(callerGraph->first);
+        if (FFlag::DebugLuauBytecodeSlotAllocStats)
+            fprintf(
+                stderr,
+                "BytecodeSlotAlloc function=%s old=%u new=%u applied=%d movesRemoved=%u movesRemaining=%u loopMovesRemaining=%u\n",
+                callerProto->debugname ? getstr(callerProto->debugname) : "",
+                unsigned(allocation.frameSizeBefore),
+                unsigned(allocation.frameSizeAfter),
+                int(allocation.applied),
+                allocation.movesRemoved,
+                allocation.movesRemaining,
+                allocation.loopMovesRemaining
+            );
     }
 
     std::vector<Proto*> protos;

@@ -63,6 +63,9 @@ public:
     struct ClassShape
     {
         int32_t className;
+        uint8_t numPrivateInstanceProps = 0;
+        uint8_t numPrivateStaticProps = 0;
+        // We only keep names for public properties. Private fields are indexed by their statically determined offsets
         std::vector<int32_t> propertyNames;
         std::vector<int32_t> methodNames;
     };
@@ -256,8 +259,6 @@ protected:
     struct Function
     {
         std::string data;
-        // Required if a later proto promotes the whole module to switch bytecode.
-        std::string versionExtras;
 
         uint8_t maxstacksize = 0;
         uint8_t numparams = 0;
